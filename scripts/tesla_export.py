@@ -49,54 +49,11 @@ for img in bpy.data.images:
 
 import bmesh as _bmesh0
 
-# Separacion 100 % programatica (sin operadores de seleccion): por esquina
-# se duplica el body y de la copia se borra todo lo que NO esta en el bbox,
-# y del body se borra lo que SI esta (las ruedas salen limpias del resto).
-def _in_wheelbox(co, sx, sz):
-    return (0.14 < sx * co.x < 0.22) and co.y < 0.16 and (0.22 < sz * co.z < 0.38)
-
-for sx in (1.0, -1.0):
-    for sz in (1.0, -1.0):
-        w = src.copy()
-        w.data = src.data.copy()
-        bpy.context.collection.objects.link(w)
-        bm = _bmesh0.new()
-        bm.from_mesh(w.data)
-        kill = [v for v in bm.verts if not _in_wheelbox(v.co, sx, sz)]
-        _bmesh0.ops.delete(bm, geom=kill, context='VERTS')
-        nw = len(bm.verts)
-        bm.to_mesh(w.data)
-        bm.free()
-        bm2 = _bmesh0.new()
-        bm2.from_mesh(src.data)
-        kill2 = [v for v in bm2.verts if _in_wheelbox(v.co, sx, sz)]
-        print(f"pasada sx={sx} sz={sz}: rueda={nw}v resto={len(bm2.verts) - len(kill2)}v")
-        _bmesh0.ops.delete(bm2, geom=kill2, context='VERTS')
-        bm2.to_mesh(src.data)
-        bm2.free()
-        w.name = f"WheelTmp_{sx:+.0f}_{sz:+.0f}"
-
-wheels = [o for o in bpy.data.objects if o.type == 'MESH' and o is not src and o.name.startswith('WheelTmp_')]
-print(f"separados: {len(wheels)} objetos rueda")
-assert len(wheels) == 4, "no salieron 4 ruedas"
-
-# Limpieza: el bbox arrastra fragmentos sueltos (faldones, detallitos).
-# Quedarse solo con la isla conexa principal de cada rueda.
-import bmesh as _bmesh
-
-body = src
-for w in wheels:
-    # semilla = vertice mas cercano al centro esperado de rueda (frame local)
-    sx = 1.0 if sum(v.co.x for v in w.data.vertices) / len(w.data.vertices) > 0 else -1.0
-    sz = 1.0 if sum(v.co.z for v in w.data.vertices) / len(w.data.vertices) > 0 else -1.0
-    seed_pt = Vector((sx * 0.18, 0.075, sz * 0.30))
-    bpy.ops.object.select_all(action='DESELECT')
-    w.select_set(True)
-    bpy.context.view_layer.objects.active = w
-    bpy.ops.object.mode_set(mode='EDIT')
-    bm = _bmesh.from_edit_mesh(w.data)
-    bm.verts.ensure_lookup_table()
-    seed = min(bm.verts, key=lambda v: (v.co - seed_pt).length)
+# Separacion por CONECTIVIDAD exacta (sin bbox destructivo): por esquina se
+# hace flood fill desde una semilla y esa isla es la rueda. Del body solo
+# sale la isla: los bordes de aleta y fragmentos cercanos se quedan en su
+# sitio (el bbox anterior los borraba y dejaba agujeros).
+def _flood_island(bm, seed):
     seen = {seed}
     stack = [seed]
     while stack:
@@ -106,12 +63,42 @@ for w in wheels:
             if x not in seen:
                 seen.add(x)
                 stack.append(x)
-    for v in bm.verts:
-        v.select = v not in seen
-    _bmesh.update_edit_mesh(w.data)
-    bpy.ops.mesh.delete(type='VERT')
-    bpy.ops.object.mode_set(mode='OBJECT')
-    print(f"  {w.name}: {len(seen)} verts de isla principal")
+    return seen
+
+for sx in (1.0, -1.0):
+    for sz in (1.0, -1.0):
+        seed_pt = Vector((sx * 0.18, 0.075, sz * 0.30))
+        bm = _bmesh0.new()
+        bm.from_mesh(src.data)
+        bm.verts.ensure_lookup_table()
+        seed = min(bm.verts, key=lambda v: (v.co - seed_pt).length)
+        island = _flood_island(bm, seed)
+        idx = {v.index for v in island}
+        nw = len(idx)
+        assert nw < 1500, f"el flood se escapo del paso de rueda ({nw}v): rueda soldada?"
+        # objeto rueda: duplicado del body con solo la isla
+        w = src.copy()
+        w.data = src.data.copy()
+        bpy.context.collection.objects.link(w)
+        bmw = _bmesh0.new()
+        bmw.from_mesh(w.data)
+        _bmesh0.ops.delete(bmw, geom=[v for v in bmw.verts if v.index not in idx], context='VERTS')
+        bmw.to_mesh(w.data)
+        bmw.free()
+        # del body: borrar solo la isla
+        _bmesh0.ops.delete(bm, geom=list(island), context='VERTS')
+        bm.to_mesh(src.data)
+        bm.free()
+        w.name = f"WheelTmp_{sx:+.0f}_{sz:+.0f}"
+        print(f"pasada sx={sx} sz={sz}: rueda={nw}v resto={len(src.data.vertices)}v")
+
+wheels = [o for o in bpy.data.objects if o.type == 'MESH' and o is not src and o.name.startswith('WheelTmp_')]
+print(f"separados: {len(wheels)} objetos rueda")
+assert len(wheels) == 4, "no salieron 4 ruedas"
+for w in wheels:
+    print(f"  {w.name}: {len(w.data.vertices)}v")
+
+body = src
 body.name = 'TeslaBody'
 
 # Clasifica cada rueda por posicion en el MUNDO Blender (matrix_world incluye
