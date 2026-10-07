@@ -188,6 +188,16 @@ Curva de par motor realista, caja automática de 6 marchas con puntos de cambio,
 ### Dirección
 Geometría Ackermann real en el eje delantero, con **tope dependiente de la velocidad**: el ángulo del slider es el de parking (a <6 m/s); por encima se recorta al ángulo que demanda como máximo ~1,6 g laterales (modelo bicicleta). A 108 km/h el Tesla gira ~3° a tope de tecla: suficiente para jugar al límite del neumático sin pedir los ~9 g absurdos del tope de parking.
 
+### Balance: subviraje y sobreviraje
+En apoyo a media carga los tres coches van de morro (deslizamiento delantero
+mayor que el trasero, β < 5°): es el balance seguro de un turismo de calle.
+Sin control de tracción ni ESP, al límite aparecen los comportamientos reales:
+el delantera (Kwid) ensancha con gas a fondo; los de tracción total rotan si
+insistes con potencia en pleno apoyo (el eje motriz consume su elipse en
+traccionar); y levantar el pie a mitad de curva cierra la trazada (más notable
+en el 4x4 alto). Todo progresivo, sin tijeretazos: el deslizamiento crece de
+forma continua y da ~1 s para corregirlo.
+
 ### Fuerzas adicionales
 Aerodinámica (arrastre + downforce), resistencia a la rodadura y reparto de frenada con sesgo delantero.
 

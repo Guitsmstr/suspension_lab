@@ -868,6 +868,49 @@ scenario('Los cambios cortan el par', () => {
     `corte ${dip.toFixed(0)} N·m vs ${recovered.toFixed(0)} N·m`);
 });
 
+scenario('Balance en curva: subviraje en régimen medio', (p, _t, _v) => {
+  // En la recta de Mónaco a 12 m/s con volante fijo (demanda ≈0,7 g), los
+  // tres coches deben ir de morro (alpha delantero > trasero) y sin
+  // insinuar el trompo: es el balance seguro de un turismo de calle.
+  const s = trackSpawn(TRACKS.monaco);
+  const fwdX = Math.sin(s.yaw);
+  const fwdZ = Math.cos(s.yaw);
+  for (const car of ['sport', 'offroad', 'kwid'] as const) {
+    p.applyPreset(CARS[car].preset);
+    const v = new Vehicle(p, _t, undefined, car);
+    v.setSpawn(s.x, s.z, s.yaw);
+    v.velocity.set(fwdX * 12, 0, fwdZ * 12);
+    for (let i = 0; i < Math.round(0.5 / DT); i++) {
+      v.step(DT, { throttle: 0.25, brake: 0, steer: 0, handbrake: false });
+    }
+    let dSum = 0;
+    let n = 0;
+    let peakBeta = 0;
+    for (let i = 0; i < Math.round(1.5 / DT); i++) {
+      v.step(DT, { throttle: 0.25, brake: 0, steer: 0.25, handbrake: false });
+      if (i > Math.round(1 / DT)) {
+        const aF = (Math.abs(v.cornerStates[0].alpha) + Math.abs(v.cornerStates[1].alpha)) / 2;
+        const aR = (Math.abs(v.cornerStates[2].alpha) + Math.abs(v.cornerStates[3].alpha)) / 2;
+        dSum += aF - aR;
+        n++;
+        const q = v.quaternion;
+        const fx = 2 * (q.x * q.z + q.w * q.y);
+        const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+        const sp = Math.hypot(v.velocity.x, v.velocity.z);
+        if (sp > 0.5) {
+          peakBeta = Math.max(
+            peakBeta,
+            Math.acos(Math.max(-1, Math.min(1, (v.velocity.x * fx + v.velocity.z * fz) / sp))),
+          );
+        }
+      }
+    }
+    const meanDiff = (dSum / Math.max(1, n)) * 180 / Math.PI;
+    check(`${car} va de morro en apoyo (aF>aR)`, meanDiff > 0.15, `${car} Δ=${meanDiff.toFixed(2)}°`);
+    check(`${car} estable (sin amago de trompo)`, peakBeta < 0.17, `${car} β=${(peakBeta * 180 / Math.PI).toFixed(1)}°`);
+  }
+});
+
 scenario('El suelo blando frena y hunde', (p, _t, v) => {
   // En llano (rugosidad 0): soltado a 15 m/s, en hierba debe perder más
   // velocidad que en asfalto; y parado, la rueda debe hundirse más.
