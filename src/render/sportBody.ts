@@ -66,12 +66,16 @@ export interface KwidWheelNode {
 /**
  * Cáscara con sus propias ruedas: la carrocería va al `bodyGroup` y cada
  * `Wheel_*` se devuelve aparte para acoplarlo al buje físico
- * correspondiente (gira con la dirección y el giro reales). Sin texturas:
- * el `glb` ya trae materiales planos y el contorno se añade en `CarVisual`.
+ * correspondiente (gira con la dirección y el giro reales). `droppedRims`
+ * indica si se descartaron llantas sueltas del `glb` (discos `Circle*` del
+ * Tesla): en ese caso la llanta procedural queda a la vista (ver
+ * `attachRawBody`). Sin texturas: el `glb` ya trae materiales planos y el
+ * contorno se añade en `CarVisual`.
  */
 export async function loadRawBody(url: string): Promise<{
   body: THREE.Group;
   wheels: KwidWheelNode[];
+  droppedRims: boolean;
 } | null> {
   let root: THREE.Group;
   try {
@@ -97,6 +101,35 @@ export async function loadRawBody(url: string): Promise<{
   const offX = -(bb.min.x + bb.max.x) / 2;
   body.position.set(offX, 0, 0);
   for (const w of wheels) w.obj.position.x += offX;
+  // Llantas sueltas (`Circle*` en el Tesla): son discos negros planos sin
+  // forma de llanta y duplicarían la llanta procedural (radios, aro, pinza).
+  // Se emparejan con su rueda por proximidad (centros a <0,6 m) y se
+  // descartan: queda un solo juego (neumático del `glb` + llanta procedural,
+  // ver `attachRawBody`). Sin llantas sueltas (Kwid), no cambia nada.
+  body.updateMatrixWorld(true);
+  for (const w of wheels) w.obj.updateMatrixWorld(true);
+  const rims: THREE.Object3D[] = [];
+  body.traverse((o) => {
+    if (o.name.startsWith('Circle')) rims.push(o);
+  });
+  let droppedRims = false;
+  for (const rim of rims) {
+    const rc = new THREE.Box3().setFromObject(rim).getCenter(new THREE.Vector3());
+    let best: KwidWheelNode | null = null;
+    let bestD = 0.6;
+    for (const w of wheels) {
+      const wc = new THREE.Box3().setFromObject(w.obj).getCenter(new THREE.Vector3());
+      const d = rc.distanceTo(wc);
+      if (d < bestD) {
+        bestD = d;
+        best = w;
+      }
+    }
+    if (best) {
+      rim.removeFromParent();
+      droppedRims = true;
+    }
+  }
   for (const o of [body, ...wheels.map((w) => w.obj)]) {
     o.traverse((m) => {
       const mesh = m as THREE.Mesh;
@@ -106,12 +139,13 @@ export async function loadRawBody(url: string): Promise<{
       }
     });
   }
-  return { body, wheels };
+  return { body, wheels, droppedRims };
 }
 
 export function loadKwidRaw(): Promise<{
   body: THREE.Group;
   wheels: KwidWheelNode[];
+  droppedRims: boolean;
 } | null> {
   return loadRawBody(KWID_ASSET_URL);
 }
@@ -120,6 +154,7 @@ export function loadKwidRaw(): Promise<{
 export function loadTeslaBody(): Promise<{
   body: THREE.Group;
   wheels: KwidWheelNode[];
+  droppedRims: boolean;
 } | null> {
   return loadRawBody(TESLA_ASSET_URL);
 }

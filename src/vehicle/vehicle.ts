@@ -497,7 +497,29 @@ export class Vehicle {
     const lockRad = ((P.steerLock * Math.PI) / 180) * input.steer;
     const vSteer = Math.max(this.velocity.length(), STEER_FULL_LOCK_SPEED);
     const maxByG = Math.atan((MAX_STEER_LAT_G * GRAVITY * this.wheelbase) / (vSteer * vSteer));
-    const steerInput = Math.sign(lockRad) * Math.min(Math.abs(lockRad), maxByG);
+    // Deslizamiento con signo: σ = atan2(v·R̂, v·F̂), R̂ = −X del cuerpo (la
+    // derecha del coche). En apoyo normal el morro apunta más adentro que la
+    // velocidad (σ de signo contrario al volante); si coinciden, el conductor
+    // está corrigiendo un deslizamiento (contravolante) y se amplía el tope
+    // hasta la deriva actual + 4° de margen: es el ángulo necesario para
+    // alinear las ruedas con la velocidad. Sin ampliación, un derrape grande
+    // es irrecuperable (las ruedas no llegan a apuntar a donde va el coche);
+    // con tope libre siempre, un volantazo en un derrape pequeño provoca el
+    // latigazo contrario. La ampliación escala como unas manos reales.
+    this.tmpA.set(-1, 0, 0).applyQuaternion(q);
+    const sigma = Math.atan2(
+      this.velocity.dot(this.tmpA),
+      Math.abs(this.velocity.dot(this.fwdWorld)) + 1e-3,
+    );
+    const correcting =
+      Math.abs(sigma) > (3 * Math.PI) / 180 &&
+      lockRad !== 0 &&
+      Math.sign(lockRad) === Math.sign(sigma);
+    const rescue = Math.abs(sigma) + (4 * Math.PI) / 180;
+    const steerMax = correcting
+      ? Math.min(Math.abs(lockRad), Math.max(maxByG, rescue))
+      : Math.min(Math.abs(lockRad), maxByG);
+    const steerInput = Math.sign(lockRad) * steerMax;
 
     // ---------------- Tren motriz ----------------
     const frontShare = P.driveBias;

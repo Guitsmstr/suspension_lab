@@ -162,7 +162,7 @@ export class CarVisual {
       // Tesla con sus propias ruedas; si falla, la cáscara anterior y en
       // último caso la procedural: el juego nunca se queda sin coche.
       const raw = await loadTeslaBody();
-      if (raw) visual.attachRawBody(raw.body, raw.wheels);
+      if (raw) visual.attachRawBody(raw.body, raw.wheels, raw.droppedRims);
       else {
         const body = await loadSportBody();
         if (body) {
@@ -175,7 +175,7 @@ export class CarVisual {
       // Si falla la descarga, se usa la procedural: el demo nunca se
       // queda sin coche.
       const raw = await loadKwidRaw();
-      if (raw) visual.attachRawBody(raw.body, raw.wheels);
+      if (raw) visual.attachRawBody(raw.body, raw.wheels, raw.droppedRims);
       else {
         const body = (await loadKwidBody()) ?? (await loadKwidProceduralBody());
         if (body) visual.attachSportBody(body);
@@ -199,18 +199,32 @@ export class CarVisual {
    * Cáscara con sus propias ruedas (`Wheel_*`): la cáscara va al `bodyGroup`
    * y cada rueda se acopla al buje físico de su esquina con `attach()`
    * (conserva su sitio modelado y pivota en el buje: dirige y gira con la
-   * física real). Se ocultan el vestido y la pinza procedurales y se añade
-   * el contorno stickman. Sin ruedas en el `glb`, equivale a
+   * física real). Si el `glb` traía llantas sueltas descartadas
+   * (`proceduralRim`), se muestra la llanta procedural (radios, aro, pinza)
+   * ocultando solo su neumático: queda un solo juego (goma del `glb` +
+   * llanta procedural). Si no, se ocultan vestido y pinza procedurales y se
+   * añade el contorno stickman. Sin ruedas en el `glb`, equivale a
    * `attachSportBody` + contorno.
    */
-  attachRawBody(body: THREE.Group, wheels: Array<{ name: string; obj: THREE.Object3D }>): void {
+  attachRawBody(
+    body: THREE.Group,
+    wheels: Array<{ name: string; obj: THREE.Object3D }>,
+    proceduralRim = false,
+  ): void {
     this.attachSportBody(body);
     for (const w of wheels) {
       const front = w.name.includes('Front');
       const left = w.name.includes('Left'); // +X es la izquierda del coche
       const corner = this.wheels[(front ? 0 : 2) + (left ? 1 : 0)];
-      corner.dressing.visible = false;
-      corner.caliper.visible = false; // la pinza roja asomaba por la llanta
+      if (proceduralRim) {
+        // Solo se esconde la goma procedural: la llanta queda a la vista.
+        corner.dressing.traverse((o) => {
+          if (o.name === 'TireProcedural') o.visible = false;
+        });
+      } else {
+        corner.dressing.visible = false;
+        corner.caliper.visible = false; // la pinza roja asomaba por la llanta
+      }
       this.addContour(w.obj);
       corner.spin.attach(w.obj);
     }
@@ -697,7 +711,9 @@ export class CarVisual {
     const profile = prof.map(([r, w]) => new THREE.Vector2(r * k, w * wScale));
     const tireGeo = new THREE.LatheGeometry(profile, 40);
     tireGeo.rotateZ(Math.PI / 2); // el eje de la rueda pasa a ser X
-    dressing.add(new THREE.Mesh(tireGeo, this.rubberMat));
+    const tireMesh = new THREE.Mesh(tireGeo, this.rubberMat);
+    tireMesh.name = 'TireProcedural';
+    dressing.add(tireMesh);
 
     // Taco lateral del 4x4: anillo dentado (barato: toro de baja resolución)
     if (this.carId === 'offroad') {

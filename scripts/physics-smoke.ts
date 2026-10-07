@@ -911,6 +911,74 @@ scenario('Balance en curva: subviraje en régimen medio', (p, _t, _v) => {
   }
 });
 
+scenario('Recuperación de derrape con contravolante', (p, terrain, _v) => {
+  // En hierba lisa: derrape de potencia y recuperación. Con control
+  // proporcional (manos que modulan) un derrape moderado se endereza; con
+  // contravolante a tope un derrape grande también (el tope de dirección se
+  // amplía a la deriva + 4° al corregir). Sin esa ampliación, el derrape
+  // grande sería irrecuperable.
+  p.set('roughness', 0);
+  const betaAbs = (v: Vehicle): number => {
+    const q = v.quaternion;
+    const fx = 2 * (q.x * q.z + q.w * q.y);
+    const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const sp = Math.hypot(v.velocity.x, v.velocity.z);
+    if (sp < 0.5) return 0;
+    return Math.acos(Math.max(-1, Math.min(1, (v.velocity.x * fx + v.velocity.z * fz) / sp)));
+  };
+  const sigma = (v: Vehicle): number => {
+    const q = v.quaternion;
+    const rx = -(1 - 2 * (q.y * q.y + q.z * q.z));
+    const ry = -(2 * (q.x * q.y + q.w * q.z));
+    const rz = -(2 * (q.x * q.z - q.w * q.y));
+    const fx = 2 * (q.x * q.z + q.w * q.y);
+    const fy = 2 * (q.y * q.z - q.w * q.x);
+    const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+    const vl = v.velocity.x * rx + v.velocity.y * ry + v.velocity.z * rz;
+    const vo = Math.abs(v.velocity.x * fx + v.velocity.y * fy + v.velocity.z * fz);
+    return Math.atan2(vl, vo + 1e-3);
+  };
+  const attempt = (
+    powerTime: number,
+    proportional: boolean,
+  ): { b0: number; b1: number; peak: number } => {
+    p.applyPreset(CARS.sport.preset);
+    const v = new Vehicle(p, terrain, undefined, 'sport');
+    v.setSpawn(120, 100, 0);
+    v.velocity.set(0, 0, 10);
+    run(v, 0.5, { ...NO_INPUT, throttle: 0.3 });
+    run(v, powerTime, { throttle: 1, brake: 0, steer: 0.25, handbrake: false });
+    const b0 = betaAbs(v);
+    let peak = b0;
+    const steps = Math.round(3 / DT);
+    for (let i = 0; i < steps; i++) {
+      const st = proportional
+        ? Math.max(-1, Math.min(1, ((sigma(v) * 180) / Math.PI) * 0.06))
+        : -0.6;
+      v.step(DT, { throttle: 0.3, brake: 0, steer: st, handbrake: false });
+      peak = Math.max(peak, betaAbs(v));
+    }
+    return { b0, b1: betaAbs(v), peak };
+  };
+  const deg = (r: number): string => `${((r * 180) / Math.PI).toFixed(1)}°`;
+
+  const mod = attempt(2.5, true);
+  check('derrape moderado: hay deslizamiento', mod.b0 > 0.05, `β=${deg(mod.b0)}`);
+  check(
+    'derrape moderado se recupera modulando',
+    mod.b1 < 0.11 && mod.peak < mod.b0 + 0.21,
+    `${deg(mod.b0)} → ${deg(mod.b1)} (pico ${deg(mod.peak)})`,
+  );
+  const big = attempt(4, false);
+  check('derrape grande: hay deslizamiento', big.b0 > 0.21, `β=${deg(big.b0)}`);
+  check(
+    'derrape grande se recupera con contravolante',
+    big.b1 < 0.11 && big.peak < big.b0 + 0.21,
+    `${deg(big.b0)} → ${deg(big.b1)} (pico ${deg(big.peak)})`,
+  );
+  void _v;
+});
+
 scenario('El suelo blando frena y hunde', (p, _t, v) => {
   // En llano (rugosidad 0): soltado a 15 m/s, en hierba debe perder más
   // velocidad que en asfalto; y parado, la rueda debe hundirse más.
