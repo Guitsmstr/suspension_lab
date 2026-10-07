@@ -96,7 +96,7 @@ La cámara de persecución no se aleja más de un **5 %** de la distancia elegid
 
 | | ⚡ Tesla Model 3 | 🛻 Todoterreno 4x4 | 🚗 Kwid Outsider |
 | --- | --- | --- | --- |
-| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, estilo contorno) | pick-up de rally-raid | crossover urbano (Tripo `car_kwid_model/` → `kwid_tripo.glb`, estilo contorno) |
+| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (Tripo `car_kwid_model/` → `kwid_tripo.glb`, estilo contorno) |
 | Masa / CdM | 1840 kg / 0,50 m | 1850 kg / 0,68 m | 820 kg / 0,55 m |
 | Ruedas | 0,34 m, tracción total | 0,42 m, tracción total | 0,31 m, delantera |
 | Potencia aprox. | ~250 kW | ~175 kW | ~54 kW (68 CV reales) |
