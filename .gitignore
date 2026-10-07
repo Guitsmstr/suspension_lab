@@ -1,0 +1,30 @@
+# Dependencias y artefactos de build
+node_modules/
+dist/
+.smoke/
+.smoke-probe/
+*.log
+
+# macOS
+.DS_Store
+
+# Herramientas locales de arranque/QA
+.launch/
+
+# Materia prima local (no forma parte de la app)
+car_images/
+car_kwid_model/
+car_tesla_model/
+.tripo/
+.tripo-work/
+.tripo-work2/
+
+# Modelos intermedios de Blender
+*.blend
+*.blend1
+
+# Assets no referenciados por el código
+public/assets/cars/kwid_parts.*
+
+# Scripts temporales de depuración
+scripts/probe_tmp.ts

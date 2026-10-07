@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Suspension Lab — coche con suspensión realista</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: rgba(18, 24, 33, 0.92);
+        --panel-border: rgba(255, 255, 255, 0.08);
+        --text: #d7e0ea;
+        --muted: #8b98a7;
+        --accent: #4da3ff;
+        --accent-2: #ffb454;
+        --good: #4dd88a;
+        --bad: #ff6b6b;
+        --track: rgba(255, 255, 255, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          'SF Pro Text',
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          Roboto,
+          sans-serif;
+        font-size: 13px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      #view {
+        position: fixed;
+        inset: 0;
+      }
+
+      canvas {
+        display: block;
+      }
+
+      /* ---------- Panel ---------- */
+      #panel {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        width: 306px;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 14px 14px 18px;
+        backdrop-filter: blur(14px);
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+      }
+
+      #panel h1 {
+        font-size: 15px;
+        margin: 0 0 2px;
+        letter-spacing: 0.2px;
+      }
+
+      #panel .subtitle {
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 12px;
+      }
+
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      #btn-collapse {
+        flex: 0 0 auto;
+        min-width: 34px;
+        padding: 6px 0;
+        font-size: 14px;
+        line-height: 1;
+      }
+
+      #panel.collapsed #params,
+      #panel.collapsed .group,
+      #panel.collapsed .buttons {
+        display: none;
+      }
+
+      #panel.collapsed .subtitle {
+        margin-bottom: 0;
+      }
+
+      #track-badge {
+        position: fixed;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 999px;
+        padding: 7px 16px;
+        font-size: 12px;
+        letter-spacing: 0.3px;
+        backdrop-filter: blur(14px);
+        white-space: nowrap;
+      }
+
+      #car-badge {
+        position: fixed;
+        top: 48px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 999px;
+        padding: 5px 14px;
+        font-size: 11px;
+        letter-spacing: 0.3px;
+        color: var(--muted);
+        backdrop-filter: blur(14px);
+        white-space: nowrap;
+      }
+
+      /* ---------- Menú principal ---------- */
+      #menu {
+        position: fixed;
+        inset: 0;
+        z-index: 15;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(5, 8, 12, 0.62);
+        backdrop-filter: blur(6px);
+        padding: 20px;
+      }
+
+      .menu-sheet {
+        width: min(680px, calc(100vw - 40px));
+        max-height: calc(100vh - 60px);
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 18px;
+        padding: 22px 22px 18px;
+        scrollbar-width: thin;
+      }
+
+      .menu-sheet h1 {
+        margin: 0 0 2px;
+        font-size: 18px;
+      }
+
+      .menu-sheet .menu-sub {
+        color: var(--muted);
+        font-size: 11.5px;
+        margin-bottom: 14px;
+      }
+
+      .menu-sheet h2 {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 1.1px;
+        color: var(--accent);
+        margin: 16px 0 8px;
+        font-weight: 600;
+      }
+
+      .menu-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .menu-grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .menu-card {
+        display: block;
+        text-align: left;
+        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .menu-card:hover {
+        background: rgba(77, 163, 255, 0.16);
+      }
+
+      .menu-card.selected {
+        border-color: rgba(77, 163, 255, 0.65);
+        background: rgba(77, 163, 255, 0.2);
+      }
+
+      .menu-card-title {
+        font-weight: 700;
+        font-size: 12.5px;
+        margin-bottom: 3px;
+      }
+
+      .menu-card-sub {
+        color: var(--muted);
+        font-size: 10.5px;
+      }
+
+      .menu-card-desc {
+        color: var(--text);
+        font-size: 11px;
+        margin-top: 4px;
+        opacity: 0.85;
+      }
+
+      .menu-foot {
+        display: flex;
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      #btn-drive {
+        flex: 1 1 auto;
+        padding: 10px;
+        font-size: 13px;
+        font-weight: 700;
+        background: rgba(77, 163, 255, 0.3);
+      }
+
+      /* Botón flotante para abrir el menú con el panel contraído */
+      #menu-fab {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        z-index: 14;
+        width: 46px;
+        height: 46px;
+        min-width: 46px;
+        border-radius: 50%;
+        font-size: 19px;
+        background: var(--panel);
+        backdrop-filter: blur(14px);
+      }
+
+      .group {
+        margin-top: 14px;
+      }
+
+      .group > h2 {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 1.1px;
+        color: var(--accent);
+        margin: 0 0 8px;
+        font-weight: 600;
+      }
+
+      .param {
+        margin-bottom: 11px;
+      }
+
+      .param .row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 4px;
+      }
+
+      .param .label {
+        color: var(--text);
+        font-size: 11.5px;
+      }
+
+      .param .value {
+        font-variant-numeric: tabular-nums;
+        font-size: 11px;
+        color: var(--accent-2);
+      }
+
+      input[type='range'] {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 3px;
+        border-radius: 3px;
+        background: var(--track);
+        outline: none;
+      }
+
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+        border: 2px solid #0d1117;
+      }
+
+      input[type='range']::-moz-range-thumb {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+        border: 2px solid #0d1117;
+      }
+
+      /* ---------- Telemetry ---------- */
+      .telemetry {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .stat {
+        background: rgba(255, 255, 255, 0.045);
+        border-radius: 9px;
+        padding: 7px 9px;
+      }
+
+      .stat .k {
+        color: var(--muted);
+        font-size: 9.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+      }
+
+      .stat .v {
+        font-size: 15px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+
+      .stat .v small {
+        font-size: 9.5px;
+        color: var(--muted);
+        font-weight: 400;
+      }
+
+      .wheel-row {
+        display: grid;
+        grid-template-columns: 26px 1fr 52px;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 5px;
+      }
+
+      .wheel-row .name {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .bar {
+        position: relative;
+        height: 9px;
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.07);
+        overflow: hidden;
+      }
+
+      .bar .fill {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        background: var(--accent);
+        transition: none;
+      }
+
+      .bar .zero {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 1px;
+        background: rgba(255, 255, 255, 0.22);
+      }
+
+      .wheel-row .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-size: 10px;
+        color: var(--text);
+      }
+
+      /* ---------- Buttons ---------- */
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 12px;
+      }
+
+      button {
+        flex: 1 1 auto;
+        min-width: 66px;
+        padding: 7px 9px;
+        font-size: 11px;
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid var(--panel-border);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      button:hover {
+        background: rgba(77, 163, 255, 0.22);
+      }
+
+      button.active {
+        background: rgba(77, 163, 255, 0.32);
+        border-color: rgba(77, 163, 255, 0.5);
+      }
+
+      /* ---------- Help / HUD ---------- */
+      #help {
+        position: fixed;
+        left: 12px;
+        top: 12px;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.75;
+        backdrop-filter: blur(14px);
+      }
+
+      #help b {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.09);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-weight: 600;
+        font-size: 10px;
+      }
+
+      #hud {
+        position: fixed;
+        left: 12px;
+        bottom: 12px;
+        padding: 6px 10px 8px;
+        min-width: 0;
+        text-align: left;
+        background: transparent;
+        border: none;
+        backdrop-filter: none;
+        pointer-events: none;
+      }
+
+      #hud .speed {
+        font-size: 128px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+        text-shadow: 0 2px 14px rgba(0, 0, 0, 0.8);
+      }
+
+      #hud .speed small {
+        font-size: 32px;
+        color: var(--text);
+        font-weight: 500;
+        opacity: 0.9;
+      }
+
+      #hud .gear {
+        margin-top: 6px;
+        font-size: 30px;
+        letter-spacing: 0.5px;
+        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+      }
+
+      #hud .gear b {
+        color: var(--accent-2);
+        font-size: 34px;
+      }
+
+      #hud .surface {
+        margin-top: 8px;
+        font-size: 27px;
+        letter-spacing: 0.5px;
+        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+      }
+
+      #hud .rpm-bar {
+        margin-top: 10px;
+        height: 12px;
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+        box-shadow: 0 1px 10px rgba(0, 0, 0, 0.6);
+      }
+
+      #hud .lap {
+        margin-top: 10px;
+        font-size: 40px;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+      }
+
+      #hud .lap-sub {
+        margin-top: 4px;
+        font-size: 27px;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85);
+      }
+
+      #race-warn {
+        position: fixed;
+        top: 84px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(140, 24, 24, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        padding: 6px 16px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+        z-index: 12;
+      }
+
+      /* ---------- Cuenta atrás al reiniciar ---------- */
+      #countdown {
+        position: fixed;
+        top: 38%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 120px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        color: var(--text);
+        text-shadow: 0 4px 30px rgba(0, 0, 0, 0.85);
+        pointer-events: none;
+        z-index: 14;
+      }
+
+      .rpm-bar {
+        margin-top: 8px;
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.09);
+        overflow: hidden;
+      }
+
+      .rpm-bar .fill {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, var(--good), var(--accent-2), var(--bad));
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      /* ---------- Pantalla de carga ---------- */
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background:
+          radial-gradient(1200px 600px at 50% -10%, rgba(77, 163, 255, 0.12), transparent 70%),
+          var(--bg);
+        z-index: 20;
+        transition:
+          opacity 0.5s ease,
+          visibility 0.5s ease;
+      }
+
+      #loading.done {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      .loader {
+        width: min(420px, calc(100vw - 48px));
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        padding: 22px 22px 20px;
+        text-align: center;
+      }
+
+      .loader-title {
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+
+      .loader-sub {
+        color: var(--muted);
+        font-size: 11.5px;
+        margin: 4px 0 18px;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+      }
+
+      .loader-bar {
+        height: 6px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+      }
+
+      .loader-fill {
+        height: 100%;
+        width: 0%;
+        border-radius: 4px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        transition: width 0.35s ease;
+      }
+
+      .loader-fill.error {
+        background: var(--bad);
+      }
+
+      .loader-status {
+        margin-top: 10px;
+        font-size: 11.5px;
+        color: var(--muted);
+        min-height: 16px;
+      }
+
+      .loader-error {
+        margin-top: 16px;
+        text-align: left;
+        background: rgba(255, 107, 107, 0.1);
+        border: 1px solid rgba(255, 107, 107, 0.35);
+        border-radius: 10px;
+        padding: 11px 12px;
+      }
+
+      .loader-error-title {
+        color: var(--bad);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 5px;
+      }
+
+      .loader-error-msg {
+        font-size: 11.5px;
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .loader-error details {
+        margin-top: 8px;
+      }
+
+      .loader-error summary {
+        cursor: pointer;
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+
+      .loader-error pre {
+        margin: 7px 0 0;
+        padding: 8px;
+        max-height: 150px;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 7px;
+        font-size: 9.5px;
+        line-height: 1.5;
+        color: #e2b6b6;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <div id="loading">
+      <div class="loader">
+        <div class="loader-title">Suspension Lab</div>
+        <div class="loader-sub">Cargando simulación…</div>
+        <div class="loader-bar"><div class="loader-fill" id="loader-fill"></div></div>
+        <div class="loader-status" id="loader-status">Iniciando</div>
+        <div class="loader-error" id="loader-error" hidden>
+          <div class="loader-error-title">⚠ Algo ha salido mal</div>
+          <div class="loader-error-msg" id="loader-error-msg"></div>
+          <details>
+            <summary>Detalles técnicos</summary>
+            <pre id="loader-error-stack"></pre>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <div id="hud">
+      <div class="speed"><span id="speed">0</span> <small>km/h</small></div>
+      <div class="gear">MARCHA <b id="gear">1</b> · <span id="rpm">900</span> rpm</div>
+      <div class="rpm-bar"><div class="fill" id="rpm-fill"></div></div>
+      <div class="lap"><span id="lap-count">V0</span> · <span id="lap-time">0:00.0</span></div>
+      <div class="lap-sub">última <span id="lap-last">—</span> · mejor <span id="lap-best">—</span></div>
+      <div class="surface" id="surface">🛣 asfalto</div>
+    </div>
+
+    <div id="race-warn" hidden></div>
+    <div id="countdown" hidden></div>
+
+    <div id="track-badge">🏁 Mónaco GP · asfalto</div>
+    <div id="car-badge">⚡ Tesla · total</div>
+
+    <div id="menu" class="hidden">
+      <div class="menu-sheet">
+        <h1>Suspension Lab</h1>
+        <div class="menu-sub">Garaje, circuitos y cámara — todo desde aquí</div>
+        <h2>Garaje</h2>
+        <div class="menu-grid" id="menu-cars"></div>
+        <h2>Circuito · Asfalto</h2>
+        <div class="menu-grid" id="menu-road"></div>
+        <h2>Circuito · Tierra</h2>
+        <div class="menu-grid" id="menu-dirt"></div>
+        <h2>Cámara</h2>
+        <div class="menu-grid-3" id="menu-cams"></div>
+        <div class="menu-foot">
+          <button id="btn-drive">Conducir (M)</button>
+        </div>
+      </div>
+    </div>
+    <button id="menu-fab" title="Abrir menú (M)">☰</button>
+
+    <div id="panel">
+      <div class="panel-head">
+        <div>
+          <h1>Suspension Lab</h1>
+          <div class="subtitle">Simulación multi-cuerpo en tiempo real · 4 ruedas independientes</div>
+        </div>
+        <button id="btn-collapse" title="Contraer panel (O)">–</button>
+      </div>
+      <div id="params"></div>
+      <div class="group">
+        <h2>Telemetría</h2>
+        <div class="telemetry" id="telemetry"></div>
+        <div style="height: 10px"></div>
+        <div id="wheel-bars"></div>
+      </div>
+      <div class="buttons">
+        <button id="btn-reset">Reiniciar (R)</button>
+        <button id="btn-pause">Pausa (P)</button>
+        <button id="btn-camera">Cámara (C)</button>
+        <button id="btn-help">Ayuda (H)</button>
+        <button id="btn-track">Circuito (T)</button>
+        <button id="btn-car">Coche (V)</button>
+        <button id="btn-menu">Menú (M)</button>
+      </div>
+    </div>
+
+    <div id="help">
+      <b>W</b>/<b>↑</b> acelerar &nbsp; <b>S</b>/<b>↓</b> frenar · atrás &nbsp; <b>A</b> <b>D</b>/<b>←</b> <b>→</b> girar<br />
+      <b>SPACE</b> freno de mano &nbsp; <b>R</b> reiniciar &nbsp; <b>C</b> cámara &nbsp; <b>P</b> pausa<br />
+      <b>T</b> circuito &nbsp; <b>V</b> coche &nbsp; <b>M</b> menú &nbsp; <b>O</b> contraer panel<br />
+      Arrastra con el ratón para orbitar · rueda para zoom
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+      // Red de seguridad: si el módulo principal no llega a ejecutarse (error de
+      // red, de sintaxis…), la pantalla de carga no quedaría muda para siempre.
+      setTimeout(function () {
+        var loading = document.getElementById('loading');
+        var errBox = document.getElementById('loader-error');
+        if (!loading || !errBox) return;
+        if (!loading.classList.contains('done') && errBox.hidden) {
+          errBox.hidden = false;
+          document.getElementById('loader-error-msg').textContent =
+            'La aplicación no ha terminado de cargar. Revisa la consola del navegador (F12) para ver el motivo.';
+          document.getElementById('loader-status').textContent = 'Carga incompleta';
+          document.getElementById('loader-fill').classList.add('error');
+          document.getElementById('loader-fill').style.width = '100%';
+        }
+      }, 12000);
+    </script>
+  </body>
+</html>
