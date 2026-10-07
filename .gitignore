@@ -11,6 +11,9 @@ dist/
 # Herramientas locales de arranque/QA
 .launch/
 
+# Vercel (config local del CLI)
+.vercel/
+
 # Materia prima local (no forma parte de la app)
 car_images/
 car_kwid_model/
