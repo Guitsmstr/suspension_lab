@@ -97,6 +97,14 @@ La cámara de persecución no se aleja más de un **5 %** de la distancia elegid
 | | ⚡ Tesla Model 3 | 🛻 Todoterreno 4x4 | 🚗 Kwid Outsider |
 | --- | --- | --- | --- |
 | Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (Tripo `car_kwid_model/` → `kwid_tripo.glb`, estilo contorno) |
+
+#### Iterar el modelo del Tesla
+El `.blend` (`car_tesla_model/`, ignorado por git) se convierte al `.glb` del
+juego con un script que normaliza escala, orientación, bujes y normales:
+`./scripts/tesla-deploy.sh` (solo exporta + verifica), `--serve` (abre el
+juego), `--shot` (capturas en `.launch/`), `--deploy` (commit + push;
+Vercel autodespliega). Contrato en Blender: todo el coche en un objeto,
+morro en +Z; las ruedas se separan solas por conectividad.
 | Masa / CdM | 1840 kg / 0,50 m | 1850 kg / 0,68 m | 820 kg / 0,55 m |
 | Ruedas | 0,34 m, tracción total | 0,42 m, tracción total | 0,31 m, delantera |
 | Potencia aprox. | ~250 kW | ~175 kW | ~54 kW (68 CV reales) |
