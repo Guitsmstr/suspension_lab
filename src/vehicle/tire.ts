@@ -24,6 +24,13 @@ export interface TireConfig {
 
 export const KAPPA_PEAK = 0.115; // slip ratio donde aparece el pico
 export const ALPHA_PEAK = 0.135; // ángulo de deslizamiento de pico [rad] (~7.7°)
+/**
+ * Rigidez del empuje de camber: fuerza lateral por radián de camber, como
+ * fracción de la carga vertical. Un neumático de turismo ronda 1-3 (carcasa
+ * radial: ~150 N/° a 4 kN ≈ 2,1 por rad); se usa un valor conservador porque
+ * el modelo no incluye la caída de huella asociada.
+ */
+export const CAMBER_STIFFNESS = 0.9;
 
 const CX = 1.62; // factor de forma longitudinal
 const CY = 1.4; // factor de forma lateral
@@ -41,6 +48,10 @@ const EMPTY: TireForces = { fx: 0, fy: 0 };
  * @param fz    carga vertical en el neumático [N], >= 0
  * @param kappa slip ratio = (ω·R - v_long) / |v_long|ref
  * @param alpha ángulo de deslizamiento [rad], positivo = desliza hacia la derecha
+ * @param camber caída de la rueda [rad] (negativo = parte alta hacia el coche)
+ * @param side  lado de la rueda: -1 izquierda (x<0), +1 derecha. El empuje de
+ *   camber tira hacia el lado donde se inclina la rueda, así que es simétrico
+ *   en espejo: con el mismo camber en ambos lados la resultante es nula.
  */
 export function tireForces(
   fz: number,
@@ -48,6 +59,8 @@ export function tireForces(
   alpha: number,
   cfg: TireConfig,
   out: TireForces = { fx: 0, fy: 0 },
+  camber = 0,
+  side: -1 | 1 = 1,
 ): TireForces {
   if (fz <= 0) {
     out.fx = 0;
@@ -64,7 +77,11 @@ export function tireForces(
 
   // Fuerza de cada eje con su propia curva de Pacejka
   const fx0 = D * Math.sin(CX * Math.atan(BX * kappa));
-  const fy0 = -D * Math.sin(CY * Math.atan(BY * alpha));
+  // El camber genera empuje lateral hacia donde se inclina la rueda; entra en
+  // la combinación como demanda lateral más (satura con el resto).
+  const fySlip = -D * Math.sin(CY * Math.atan(BY * alpha));
+  const fyCamber = CAMBER_STIFFNESS * camber * fz * side;
+  const fy0 = fySlip + fyCamber;
 
   // Elipse de fricción: la combinación no puede superar la capacidad del neumático
   const combined = Math.hypot(fx0, fy0) / D;

@@ -86,6 +86,15 @@ const MAX_BRAKE_TORQUE = 6400; // N·m totales
 /** Velocidad máxima marcha atrás [m/s] (~30 km/h, como una reversa real). */
 const MAX_REVERSE_SPEED = 8.5;
 const HANDBRAKE_TORQUE = 4200; // N·m en el eje trasero
+/**
+ * Demanda lateral máxima que permite la dirección [g]: por encima de cierta
+ * velocidad el tope de giro se recorta para no pedir más que esto. Un turismo
+ * real a 70 km/h no admite ni de lejos el tope de parking (pediría ~9 g);
+ * 1,6 g deja jugar al límite del neumático (~1 g) sin demandas absurdas.
+ */
+const MAX_STEER_LAT_G = 1.6;
+/** Por debajo de esta velocidad la dirección conserva todo el tope [m/s]. */
+const STEER_FULL_LOCK_SPEED = 6;
 
 // ---------- Contacto de la carrocería con el terreno ----------
 /**
@@ -130,6 +139,15 @@ const OBST_CT = 4_000; // N·s/m — rozamiento viscoso tangencial
 const MAX_TIRE_FZ = 45_000; // N
 /** Penetración máxima que alimenta al muelle vertical (evita picos de fuerza). */
 const MAX_TIRE_PEN = 0.35; // m
+/**
+ * Suelo blando: en tierra y hierba el neumático se hunde (la goma deja de
+ * mandar y aparece la resistencia del suelo, Bekker/Wong). Se modela con más
+ * resistencia a la rodadura y menos rigidez vertical (más deflexión = el
+ * coche baja unos mm y cuesta moverlo). Referencias: rodadura en hierba
+ * ≈0,03-0,05 frente a 0,014 en asfalto.
+ */
+const SOFT_ROLLING: Record<string, number> = { asphalt: 1, dirt: 2.0, grass: 3.2 };
+const SOFT_VERTICAL: Record<string, number> = { asphalt: 1, dirt: 0.85, grass: 0.7 };
 
 const UP = new THREE.Vector3(0, 1, 0);
 const FORWARD = new THREE.Vector3(0, 0, 1);
@@ -293,6 +311,8 @@ export class Vehicle {
   private readonly qInv = new THREE.Quaternion();
   private readonly qDelta = new THREE.Quaternion();
   private readonly driveTorques: number[] = [0, 0, 0, 0];
+  /** Par de freno motor por rueda [N·m, ≤0], repartido como el par motriz. */
+  private readonly engineBrakeTorques: number[] = [0, 0, 0, 0];
   /** Búfer sin asignaciones para las consultas al campo de obstáculos. */
   private readonly nearObstacles: Obstacle[] = new Array(24);
 
@@ -471,7 +491,13 @@ export class Vehicle {
     this.forceApp.set(0, 0, 0);
 
     // ---------------- Dirección ----------------
-    const steerInput = (P.steerLock * Math.PI) / 180 * input.steer;
+    // Tope de giro dependiente de la velocidad: el ángulo que a 5 m/s aparca,
+    // a 30 m/s pediría varios g laterales. Se recorta al ángulo que demanda
+    // como máximo MAX_STEER_LAT_G (modelo bicicleta: δ = atan(a·L/v²)).
+    const lockRad = ((P.steerLock * Math.PI) / 180) * input.steer;
+    const vSteer = Math.max(this.velocity.length(), STEER_FULL_LOCK_SPEED);
+    const maxByG = Math.atan((MAX_STEER_LAT_G * GRAVITY * this.wheelbase) / (vSteer * vSteer));
+    const steerInput = Math.sign(lockRad) * Math.min(Math.abs(lockRad), maxByG);
 
     // ---------------- Tren motriz ----------------
     const frontShare = P.driveBias;
@@ -522,6 +548,25 @@ export class Vehicle {
     this.driveTorques[1] = tfr;
     this.driveTorques[2] = trl;
     this.driveTorques[3] = trr;
+
+    // Freno motor por rueda: sigue el mismo camino que el par motriz (solo
+    // llega a las ruedas motrices, repartido por el diferencial). Antes se
+    // calculaba en el Drivetrain pero nunca se aplicaba: soltar el gas solo
+    // dejaba aero + rodadura y el coche retenía menos que uno real.
+    const [ebfl, ebfr] = splitAxleTorque(
+      dtv.engineBrakeTorque * frontShare,
+      this.cornerStates[0].wheelOmega,
+      this.cornerStates[1].wheelOmega,
+    );
+    const [ebrl, ebrr] = splitAxleTorque(
+      dtv.engineBrakeTorque * (1 - frontShare),
+      this.cornerStates[2].wheelOmega,
+      this.cornerStates[3].wheelOmega,
+    );
+    this.engineBrakeTorques[0] = ebfl;
+    this.engineBrakeTorques[1] = ebfr;
+    this.engineBrakeTorques[2] = ebrl;
+    this.engineBrakeTorques[3] = ebrr;
 
     const brakeBase = (this.reversing ? 0 : input.brake) * MAX_BRAKE_TORQUE * P.brakeStrength;
     const brakeTorques = [
@@ -586,6 +631,12 @@ export class Vehicle {
       // --- neumático vertical ---
       const groundY = this.terrain.heightAt(this.pWheel.x, this.pWheel.z);
       const gap = this.pWheel.y - this.wheelRadius - groundY; // >0 = en el aire
+      // Suelo blando: más resistencia a la rodadura y menos rigidez vertical.
+      const surfKind = this.terrain.surfaceKindAt
+        ? this.terrain.surfaceKindAt(this.pWheel.x, this.pWheel.z)
+        : 'asphalt';
+      const rrMul = SOFT_ROLLING[surfKind] ?? 1;
+      const vertMul = SOFT_VERTICAL[surfKind] ?? 1;
       let fTz = 0;
       if (gap < 0) {
         // La penetración se acota: sin ello, un aterrizaje fuerte dispara la
@@ -593,7 +644,7 @@ export class Vehicle {
         const pen = Math.min(-gap, MAX_TIRE_PEN);
         fTz = Math.min(
           MAX_TIRE_FZ,
-          Math.max(0, P.tireVertStiff * 1000 * pen - P.tireVertDamp * this.vWheel.y),
+          Math.max(0, P.tireVertStiff * vertMul * 1000 * pen - P.tireVertDamp * this.vWheel.y),
         );
       }
       st.tireLoad = fTz;
@@ -651,13 +702,27 @@ export class Vehicle {
       }
 
       // --- fuerzas del neumático ---
-      const f = tireForces(fTz, st.kappa, st.alpha, this.cornerTireCfg[i], this.tf);
+      const f = tireForces(
+        fTz,
+        st.kappa,
+        st.alpha,
+        this.cornerTireCfg[i],
+        this.tf,
+        st.camber,
+        c.x < 0 ? -1 : 1,
+      );
       let fx = f.fx;
-      if (Math.abs(vLong) > 0.3) fx -= ROLLING_RESISTANCE * fTz * Math.sign(vLong);
+      if (Math.abs(vLong) > 0.3) fx -= ROLLING_RESISTANCE * rrMul * fTz * Math.sign(vLong);
       const fy = f.fy;
 
       // --- giro de la rueda ---
       st.wheelOmega += ((this.driveTorques[i] - fx * this.wheelRadius) / c.wheelInertia) * dt;
+      const engBrake = this.engineBrakeTorques[i];
+      if (engBrake < 0 && Math.abs(st.wheelOmega) > 1e-3) {
+        // Freno motor: se opone al giro sin invertirlo (como los frenos).
+        const dOmega = (-engBrake * dt) / c.wheelInertia;
+        st.wheelOmega -= Math.sign(st.wheelOmega) * Math.min(dOmega, Math.abs(st.wheelOmega));
+      }
       const brakeTorque = brakeTorques[i];
       if (brakeTorque > 0) {
         const dOmega = (brakeTorque * dt) / c.wheelInertia;

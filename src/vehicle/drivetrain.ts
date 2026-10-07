@@ -19,6 +19,14 @@ const REDLINE_RPM = 6800;
 const SHIFT_UP_RPM = 6250;
 const SHIFT_DOWN_RPM = 2350;
 const SHIFT_COOLDOWN = 0.45; // s
+/**
+ * Corte de par al cambiar de marcha [s]: una caja real interrumpe el par
+ * durante el cambio (caída de encendido / desembrague). Sin esto los cambios
+ * son instantáneos y perfectos, más propios de un arcade.
+ */
+const SHIFT_CUT_TIME = 0.15;
+/** Par residual durante el corte (12 %: el motor no se apaga del todo). */
+const SHIFT_CUT_RESIDUAL = 0.12;
 
 /** Curva de par [N·m] en función del régimen [rpm], interpolada linealmente. */
 const TORQUE_CURVE: Array<[number, number]> = [
@@ -58,11 +66,13 @@ export class Drivetrain {
   gearIndex = 0;
   rpm = IDLE_RPM;
   private shiftCooldown = 0;
+  private shiftCut = 0;
 
   reset(): void {
     this.gearIndex = 0;
     this.rpm = IDLE_RPM;
     this.shiftCooldown = 0;
+    this.shiftCut = 0;
   }
 
   /**
@@ -83,6 +93,7 @@ export class Drivetrain {
       this.rpm = Math.max(IDLE_RPM, Math.min(REDLINE_RPM + 250, rawRpm));
       this.gearIndex = -1;
       this.shiftCooldown = 0;
+      this.shiftCut = 0;
       const throttleClamped = Math.max(0, Math.min(1, throttle));
       let crankTorque = 0;
       if (throttleClamped > 0.02 && this.rpm < REDLINE_RPM) {
@@ -102,13 +113,16 @@ export class Drivetrain {
 
     // Autocambio
     this.shiftCooldown = Math.max(0, this.shiftCooldown - dt);
+    this.shiftCut = Math.max(0, this.shiftCut - dt);
     if (this.shiftCooldown <= 0) {
       if (this.rpm > SHIFT_UP_RPM && this.gearIndex < GEARS.length - 1) {
         this.gearIndex++;
         this.shiftCooldown = SHIFT_COOLDOWN;
+        this.shiftCut = SHIFT_CUT_TIME;
       } else if (this.rpm < SHIFT_DOWN_RPM && this.gearIndex > 0) {
         this.gearIndex--;
         this.shiftCooldown = SHIFT_COOLDOWN;
+        this.shiftCut = SHIFT_CUT_TIME;
       }
     }
 
@@ -116,12 +130,15 @@ export class Drivetrain {
     const throttleClamped = Math.max(0, Math.min(1, throttle));
 
     // Par en el cigüeñal: acelerador * curva, o freno motor cuando no hay
-    // aceleración (o al llegar al limitador de régimen)
+    // aceleración (o al llegar al limitador de régimen). El arrastre del
+    // motor reteniendo ronda −15/−20 N·m por cada 1000 rpm en un turismo.
     let crankTorque: number;
     if (throttleClamped > 0.02 && this.rpm < REDLINE_RPM) {
       crankTorque = curveTorque(this.rpm) * throttleClamped * cfg.powerScale;
+      // Cambio en curso: el par cae casi a cero durante el corte.
+      if (this.shiftCut > 0) crankTorque *= SHIFT_CUT_RESIDUAL;
     } else {
-      crankTorque = -22 * (this.rpm / 1000);
+      crankTorque = -18 * (this.rpm / 1000);
     }
 
     const driveTorque = Math.max(0, crankTorque) * gearNow * FINAL_DRIVE * DRIVE_EFFICIENCY;

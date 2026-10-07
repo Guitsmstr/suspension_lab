@@ -65,7 +65,7 @@ provoca un fallo controlado para comprobarlo). Las capturas quedan en `.launch/`
 
 ## Menú principal
 
-Con `M` (o el botón ☰) se abre el menú con todo: **garaje** (los dos coches),
+Con `M` (o el botón ☰) se abre el menú con todo: **garaje** (los tres coches),
 **circuitos** (los cuatro trazados agrupados por superficie, con inspiración,
 longitud y ancho) y **cámara**. Elegir coche o circuito lo aplica al momento y
 reaparece el coche en la salida del trazado. Al cambiar de coche se aplica su
@@ -97,10 +97,11 @@ La cámara de persecución no se aleja más de un **5 %** de la distancia elegid
 | | ⚡ Tesla Model 3 | 🛻 Todoterreno 4x4 | 🚗 Kwid Outsider |
 | --- | --- | --- | --- |
 | Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, estilo contorno) | pick-up de rally-raid | crossover urbano (Tripo `car_kwid_model/` → `kwid_tripo.glb`, estilo contorno) |
-| Masa / CdM | 1840 kg / 0,50 m | 1850 kg / 0,68 m | 950 kg / 0,52 m |
+| Masa / CdM | 1840 kg / 0,50 m | 1850 kg / 0,68 m | 820 kg / 0,55 m |
 | Ruedas | 0,34 m, tracción total | 0,42 m, tracción total | 0,31 m, delantera |
-| Muelles / estabilizadoras | firmes (40/52 N/mm) | blandos y altos (24/27 N/mm, +12 mm) | medios (24/28 N/mm) |
-| Dirección máx. | 32° | 38° | 36° |
+| Potencia aprox. | ~250 kW | ~175 kW | ~54 kW (68 CV reales) |
+| Muelles / estabilizadoras | firmes (40/52 N/mm) | blandos y altos (24/27 N/mm, +12 mm) | blandos (24/20 N/mm) |
+| Dirección máx. | 32° (en parking) | 38° (en parking) | 36° (en parking) |
 
 Cada coche trae su geometría (vías, batalla, puntos bajos de carrocería), sus
 masas y su preset de parámetros; la física (`Vehicle`) y el visual (`CarVisual`)
@@ -131,6 +132,8 @@ Fórmula mágica de Pacejka simplificada por eje (`Fx0(κ)`, `Fy0(α)`) con:
 
 - combinación mediante **elipse de fricción** estricta en espacio de fuerzas,
 - **sensibilidad a la carga potencial** (`F ∝ Fz^0.85`, ver abajo),
+- **empuje de camber**: la caída genera fuerza lateral hacia donde se inclina
+  la rueda (≈0,9·Fz por radián; simétrico en espejo: en recta se cancela),
 - **longitud de relajación** (el neumático necesita distancia para generar fuerza),
 - rigidez y amortiguación verticales propias (el neumático también es un muelle).
 
@@ -165,9 +168,11 @@ bajo el coche.
 | 🟢 hierba (resto del mapa) | ×0,40 | goma/hierba 0,35 (Engineering Toolbox) |
 
 Combinaciones típicas: deportivo en asfalto 1,05 · en hierba 0,42;
-todoterreno en tierra 0,57. En tierra blanda manda la cizalla del suelo
-(Bekker/Wong), no la goma: por eso las diferencias entre compuestos se
-aplanan fuera del asfalto.
+todoterreno en tierra 0,57. Fuera del asfalto el modelo añade **suelo blando**:
+la rodadura se multiplica (tierra ×2,0, hierba ×3,2) y la rigidez vertical del
+neumático baja (×0,85 / ×0,7): la rueda se hunde unos mm y cuesta mover el
+coche, como manda la cizalla del suelo (Bekker/Wong). Por eso las diferencias
+entre compuestos se aplanan fuera del asfalto.
 
 #### Una nota sobre el subviraje
 Con el volante a tope a 20 m/s se piden ~9 g laterales con un límite
@@ -178,7 +183,10 @@ baja a ~0,4 g y hay que ir acorde. Sin control de tracción, el trasera
 a fondo quema goma en 1ª/2ª como cualquier propulsión real.
 
 ### Tren motriz
-Curva de par motor realista, caja automática de 6 marchas con puntos de cambio, freno motor, diferencial con bloqueo limitado por eje y reparto de par configurable entre ejes (de tracción trasera a delantera). Con el coche parado, mantener el freno (`S`) engrana la **marcha atrás** (desmultiplicación fija ≈ 1ª, par negativo, tope ~30 km/h, `R` en el HUD y en la telemetría como marcha 0); el acelerador (`W`) desengrana y vuelve a 1ª.
+Curva de par motor realista, caja automática de 6 marchas con puntos de cambio, **corte de par al cambiar** (0,15 s casi sin par, como una caja real), **freno motor** (arrastre ≈18 N·m por cada 1000 rpm, repartido a las ruedas motrices), diferencial con bloqueo limitado por eje y reparto de par configurable entre ejes (de tracción trasera a delantera). Con el coche parado, mantener el freno (`S`) engrana la **marcha atrás** (desmultiplicación fija ≈ 1ª, par negativo, tope ~30 km/h, `R` en el HUD y en la telemetría como marcha 0); el acelerador (`W`) desengrana y vuelve a 1ª.
+
+### Dirección
+Geometría Ackermann real en el eje delantero, con **tope dependiente de la velocidad**: el ángulo del slider es el de parking (a <6 m/s); por encima se recorta al ángulo que demanda como máximo ~1,6 g laterales (modelo bicicleta). A 108 km/h el Tesla gira ~3° a tope de tecla: suficiente para jugar al límite del neumático sin pedir los ~9 g absurdos del tope de parking.
 
 ### Fuerzas adicionales
 Aerodinámica (arrastre + downforce), resistencia a la rodadura y reparto de frenada con sesgo delantero.
@@ -222,7 +230,7 @@ src/
 ├── input.ts               # teclado y suavizado de dirección
 ├── vehicle/
 │   ├── params.ts          # parámetros ajustables + store (+ presets por coche)
-│   ├── cars.ts            # los dos coches: geometría, masas y presets
+│   ├── cars.ts            # los tres coches: geometría, masas y presets
 │   ├── suspension.ts      # cinemática de horquilla, muelles, topes
 │   ├── tire.ts            # Pacejka + elipse de fricción
 │   ├── drivetrain.ts      # motor, caja, diferencial

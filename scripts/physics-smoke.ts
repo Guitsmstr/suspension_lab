@@ -23,7 +23,8 @@ import {
   trackSpawn,
 } from '../src/world/track';
 import { rideMetrics, FRONT_KINEMATICS, REAR_KINEMATICS } from '../src/vehicle/suspension';
-import { tireForces } from '../src/vehicle/tire';
+import { tireForces, CAMBER_STIFFNESS } from '../src/vehicle/tire';
+import { Drivetrain } from '../src/vehicle/drivetrain';
 import { SPRUNG_MASS_FRONT, SPRUNG_MASS_REAR } from '../src/vehicle/vehicle';
 import { CarVisual, VISUAL_TIRE_DEFLECTION } from '../src/render/carMesh';
 import { CameraRig } from '../src/render/cameraRig';
@@ -264,15 +265,21 @@ scenario('A gira a la izquierda (simetría)', (_p, _t, v) => {
 // ---------------------------------------------------------------- 4. curva
 scenario('Curva sostenida (transferencia de carga)', (p, _t, v) => {
   p.set('roughness', 0); // plano: la transferencia de carga queda aislada de los baches
-  run(v, 4, { ...NO_INPUT, throttle: 0.55 });
+  // Velocidad fijada en 11 m/s: la curva se evalúa igual siempre, sin heredar
+  // la historia de la arrancada (el corte de par del cambio la alarga, como
+  // en un automático real).
+  v.velocity.set(0, 0, 11);
+  run(v, 1, NO_INPUT); // ruedas sincronizadas con la velocidad
   const speed0 = v.telemetry.speed;
   let maxTravel = 0;
   let maxRoll = 0;
+  let peakGLat = 0;
   const steps = Math.round(1.2 / DT);
   for (let i = 0; i < steps; i++) {
     const t = i * DT;
     v.step(DT, { throttle: 0.45, brake: 0, steer: Math.min(0.3, t * 1.2), handbrake: false });
     for (const s of v.cornerStates) maxTravel = Math.max(maxTravel, Math.abs(s.s));
+    peakGLat = Math.max(peakGLat, Math.abs(v.telemetry.gLat));
     // El alabeo se mide cuando de verdad hay aceleración lateral; sobre terreno
     // ondulado una muestra suelta no significa nada.
     if (Math.abs(v.telemetry.gLat) > 0.3) maxRoll = Math.max(maxRoll, Math.abs(v.telemetry.roll));
@@ -281,7 +288,7 @@ scenario('Curva sostenida (transferencia de carga)', (p, _t, v) => {
 
   check('valores finitos', isFiniteVehicle(v));
   check('mantiene la velocidad', t.speed > speed0 * 0.6, `${speed0.toFixed(1)} → ${t.speed.toFixed(1)} m/s`);
-  check('acelera lateralmente', Math.abs(t.gLat) > 0.35, `${t.gLat.toFixed(2)} g`);
+  check('acelera lateralmente', peakGLat > 0.38, `pico ${peakGLat.toFixed(2)} g`);
   check('el cuerpo alabea', maxRoll > 0.8, `alabeo máx ${maxRoll.toFixed(2)}°`);
   check('alabeo en rango físico', maxRoll < 6, `alabeo máx ${maxRoll.toFixed(2)}°`);
   check('sin topes en curva normal', maxTravel < 0.085, `recorrido máx ${(maxTravel * 1000).toFixed(1)} mm`);
@@ -767,6 +774,128 @@ scenario('Métricas de puesta a punto', (p, _t, _v) => {
     `${base.frequency.toFixed(2)} → ${stiff.frequency.toFixed(2)} Hz`);
   check('amortiguamiento razonable', base.zetaBump > 0.15 && base.zetaRebound > base.zetaBump,
     `ζ comp=${base.zetaBump.toFixed(2)} reb=${base.zetaRebound.toFixed(2)}`);
+});
+
+// -------------------------------------------- 8. realismo (freno motor, dirección, camber, cambios, suelo)
+scenario('El freno motor retiene al soltar el gas', (p, terrain, v) => {
+  // En llano (rugosidad 0), soltando el gas a 25 m/s la deceleración debe
+  // superar claramente la de aero + rodadura sola (~0,29 m/s² en el Tesla):
+  // el freno motor aporta ~0,2 m/s² más en marcha larga.
+  p.set('roughness', 0);
+  v.setSpawn(0, 0, 0);
+  v.velocity.set(0, 0, 25);
+  run(v, 8, NO_INPUT); // la caja llega a marchas largas
+  const v0 = v.telemetry.speed;
+  run(v, 2, NO_INPUT);
+  const v1 = v.telemetry.speed;
+  const decel = (v0 - v1) / 2;
+
+  check('valores finitos', isFiniteVehicle(v));
+  check('retiene más que aero + rodadura', decel > 0.38, `${decel.toFixed(2)} m/s²`);
+  check('no se clava (retención creíble)', decel < 1.2, `${decel.toFixed(2)} m/s²`);
+  void terrain;
+});
+
+scenario('La dirección se recorta con la velocidad', (p, _t, v) => {
+  // A 3 m/s el tope completo; a 30 m/s el ángulo debe quedar muy por debajo
+  // del tope de parking (32°), aunque sin llegar a cero.
+  const lockDeg = p.get('steerLock');
+  v.setSpawn(0, 0, 0);
+  v.velocity.set(0, 0, 3);
+  run(v, 0.5, { ...NO_INPUT, steer: 1 });
+  const slowSteer = Math.max(...v.cornerStates.map((s) => Math.abs(s.steer))) * 180 / Math.PI;
+
+  v.setSpawn(0, 0, 0);
+  v.velocity.set(0, 0, 30);
+  run(v, 0.5, { ...NO_INPUT, steer: 1 });
+  const fastSteer = Math.max(...v.cornerStates.map((s) => Math.abs(s.steer))) * 180 / Math.PI;
+
+  check('valores finitos', isFiniteVehicle(v));
+  check('en parado/casi parado hay tope completo', slowSteer > lockDeg - 2, `${slowSteer.toFixed(1)}°`);
+  check('a 108 km/h se recorta (<12°)', fastSteer < 12, `${fastSteer.toFixed(1)}°`);
+  check('a 108 km/h sigue habiendo dirección', fastSteer > 1, `${fastSteer.toFixed(1)}°`);
+});
+
+scenario('El camber empuja pero no tira en recta', () => {
+  // Con el mismo camber en ambos lados la resultante lateral es nula
+  // (simetría en espejo); y el empuje por rueda es apreciable (~100 N).
+  const cfg = { mu: 1, loadSens: 0.15, fzNominal: 4000 };
+  const left = tireForces(4000, 0, 0, cfg, { fx: 0, fy: 0 }, -0.03, -1);
+  const right = tireForces(4000, 0, 0, cfg, { fx: 0, fy: 0 }, -0.03, 1);
+  const plain = tireForces(4000, 0, 0, cfg, { fx: 0, fy: 0 });
+
+  check('el camber genera empuje', Math.abs(left.fy) > 50, `${left.fy.toFixed(0)} N`);
+  check('simétrico: no tira a ningún lado', Math.abs(left.fy + right.fy) < 1,
+    `${(left.fy + right.fy).toFixed(2)} N`);
+  check('orden de magnitud realista', Math.abs(left.fy) < CAMBER_STIFFNESS * 4000 * 0.05 + 200,
+    `${left.fy.toFixed(0)} N`);
+  void plain;
+});
+
+scenario('Los cambios cortan el par', () => {
+  // Caja directa: al subir de marcha el par de la siguiente ventana debe
+  // caer (corte) y recuperarse después.
+  const dt = new Drivetrain();
+  const cfg = { frontTorqueShare: 0, powerScale: 1, reverse: false };
+  let omega = 20;
+  let prevGear = 0;
+  let dip = 1;
+  let recovered = 0;
+  for (let i = 0; i < 4000; i++) {
+    omega += 0.02;
+    const out = dt.update(DT, 1, omega, cfg);
+    if (out.gearIndex !== prevGear) {
+      prevGear = out.gearIndex;
+      // Ventana de corte: los 0,22 s siguientes (~66 pasos)
+      let minT = Infinity;
+      for (let j = 0; j < 70; j++) {
+        omega += 0.02;
+        const o2 = dt.update(DT, 1, omega, cfg);
+        minT = Math.min(minT, o2.driveTorque);
+      }
+      // Tras el corte el par vuelve (misma marcha, más rpm)
+      for (let j = 0; j < 200; j++) {
+        omega += 0.005;
+        const o3 = dt.update(DT, 1, omega, cfg);
+        recovered = Math.max(recovered, o3.driveTorque);
+      }
+      dip = minT;
+      break;
+    }
+  }
+  check('hubo cambio de marcha', prevGear > 0, `marcha ${prevGear + 1}`);
+  check('el par cae durante el cambio', dip < recovered * 0.5,
+    `corte ${dip.toFixed(0)} N·m vs ${recovered.toFixed(0)} N·m`);
+});
+
+scenario('El suelo blando frena y hunde', (p, _t, v) => {
+  // En llano (rugosidad 0): soltado a 15 m/s, en hierba debe perder más
+  // velocidad que en asfalto; y parado, la rueda debe hundirse más.
+  p.set('roughness', 0);
+  const coast = (x: number, z: number): number => {
+    v.setSpawn(x, z, 0);
+    v.velocity.set(0, 0, 15);
+    run(v, 1, NO_INPUT);
+    const a = v.telemetry.speed;
+    run(v, 3, NO_INPUT);
+    return a - v.telemetry.speed;
+  };
+  const dropAsphalt = coast(0, 0);
+  const dropGrass = coast(120, 100);
+
+  const settle = (x: number, z: number): number => {
+    v.setSpawn(x, z, 0);
+    run(v, 4, NO_INPUT);
+    return Math.max(...v.cornerStates.map((s) => s.tireDeflection));
+  };
+  const deflAsphalt = settle(0, 0);
+  const deflGrass = settle(120, 100);
+
+  check('valores finitos', isFiniteVehicle(v));
+  check('en hierba retiene ~el doble que en asfalto', dropGrass > dropAsphalt * 1.8,
+    `asfalto -${dropAsphalt.toFixed(2)} m/s vs hierba -${dropGrass.toFixed(2)} m/s`);
+  check('en hierba la rueda se hunde más', deflGrass > deflAsphalt + 0.003,
+    `${(deflAsphalt * 1000).toFixed(0)} → ${(deflGrass * 1000).toFixed(0)} mm`);
 });
 
 console.log(`\n${failures === 0 ? '✅ TODAS LAS PRUEBAS PASAN' : `❌ ${failures} PRUEBA(S) FALLAN`}`);
