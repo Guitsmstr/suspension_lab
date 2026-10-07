@@ -232,12 +232,16 @@ export class CarVisual {
   }
 
   /**
-   * Estilo contorno (stickman): en vez de la triangulación completa, solo
-   * silueta + aristas marcadas. Dos piezas baratas por malla:
+   * Contorno stickman sobre una cáscara (también vale para el fallback). Dos
+   * piezas baratas por malla:
    * 1) casco invertido (misma geometría, `BackSide`, 3 % mayor): la
    *    silueta vista desde cualquier ángulo;
    * 2) `EdgesGeometry` con umbral 35°: solo las aristas duras (pasos de
    *    rueda, marcos, pliegues), no los ~60k segmentos de la triangulación.
+   *
+   * El casco solo se pone en mallas cerradas y de cierto tamaño: en
+   * superficies abiertas (cristales) o piezas finas lo taparía todo de negro.
+   * Esas llevan solo aristas.
    */
   /** Contorno stickman sobre una cáscara (también vale para el fallback). */
   addContour(root: THREE.Object3D): void {
@@ -250,9 +254,11 @@ export class CarVisual {
     const seen = new Set<THREE.Material>();
     for (const mesh of meshes) {
       const geo = mesh.geometry as THREE.BufferGeometry;
-      const hull = new THREE.Mesh(geo, CarVisual.contourMat);
-      hull.scale.setScalar(1.03);
-      mesh.add(hull);
+      if (CarVisual.needsHull(geo)) {
+        const hull = new THREE.Mesh(geo, CarVisual.contourMat);
+        hull.scale.setScalar(1.03);
+        mesh.add(hull);
+      }
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geo, 35),
         CarVisual.contourLineMat,
@@ -269,6 +275,31 @@ export class CarVisual {
         }
       }
     }
+  }
+
+  /**
+   * ¿Merece casco? Solo mallas cerradas (sin aristas de borde) y de más de
+   * ~500 vértices. Las abiertas (cristales, paneles sueltos) o diminutas
+   * (tornillería, emblemas) quedarían tapadas de negro: solo aristas.
+   */
+  private static needsHull(geo: THREE.BufferGeometry): boolean {
+    const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
+    if (!pos || pos.count < 500) return false;
+    const index = geo.index;
+    if (!index) return false;
+    const idx = index.array;
+    const boundary = new Map<number, number>();
+    for (let i = 0; i < idx.length; i += 3) {
+      for (let e = 0; e < 3; e++) {
+        const a = idx[i + e];
+        const b = idx[i + ((e + 1) % 3)];
+        const key = a < b ? a * 1000000 + b : b * 1000000 + a;
+        boundary.set(key, (boundary.get(key) ?? 0) + 1);
+      }
+    }
+    let open = 0;
+    for (const n of boundary.values()) if (n === 1) open++;
+    return open / (idx.length / 3) < 0.06;
   }
 
   private static readonly contourMat = new THREE.MeshBasicMaterial({
