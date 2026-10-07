@@ -154,6 +154,16 @@ for o in [body, *wheels]:
     for v in o.data.vertices:
         v.co.z -= 0.5
 
+# 3b. La batalla del modelo es simetrica (+-1.435) pero la fisica no
+#    (+1.492/-1.378): las ruedas quedan 5.7 cm por delante de los pasos.
+#    Se desplaza TODA la carroceria (solo ella: las ruedas ya estan en los
+#    bujes) para que los pasos caigan sobre las ruedas, sin tocar la fisica.
+#    En frame Blender (Y=largo, morro en -Y*MORRO): y += punto medio bujes.
+HUB_MID = ((-HUB_FZ) + (-HUB_RZ)) / 2 * MORRO
+for v in body.data.vertices:
+    v.co.y += HUB_MID
+print(f"carroceria desplazada en Y-blender: {HUB_MID:+.4f} m")
+
 # 4. Ruedas: escala de radio y recolocacion a los bujes fisicos.
 #    En frame Blender: X=ancho, Y=largo (morro en -Y si MORRO=+1), Z=arriba.
 for w in wheels:
