@@ -31,3 +31,6 @@ public/assets/cars/kwid_parts.*
 
 # Scripts temporales de depuración
 scripts/probe_tmp.ts
+
+# Variables de entorno locales
+.env*
