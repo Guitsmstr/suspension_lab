@@ -218,6 +218,24 @@ for p in parts:
     p.name = f"TeslaBody_{p.name}"
 print("islas separadas:", len(parts) + 1)
 
+# 5b. Suelda vertices duplicados (mesh explotado: casi todas las aristas
+#    son borde, p.ej. por un Edge Split aplicado; entonces TODO se dibuja).
+#    Solo fusiona coincidentes a <0.5 mm: no cambia la forma ni el sombreado
+#    (las normales custom se conservan), pero devuelve aristas compartidas.
+import bmesh as _bm3
+
+for o in [body, *wheels, *parts]:
+    bm = _bm3.new()
+    bm.from_mesh(o.data)
+    bm.verts.ensure_lookup_table()
+    before = len(bm.verts)
+    _bm3.ops.remove_doubles(bm, verts=bm.verts, dist=0.0005)
+    after = len(bm.verts)
+    bm.to_mesh(o.data)
+    bm.free()
+    if before != after:
+        print(f"  soldados en {o.name}: {before} -> {after} verts")
+
 # 6. Exporta carroceria (body + islas) + ruedas
 bpy.ops.object.select_all(action='DESELECT')
 body.select_set(True)

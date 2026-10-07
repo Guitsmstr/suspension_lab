@@ -50,6 +50,7 @@ echo "▶ exportando $BLEND (MORRO=$MORRO)..."
 echo "▶ verificando $GLB..."
 python3 - "$GLB" <<'EOF'
 import struct, json, array, sys
+from collections import defaultdict
 
 d = open(sys.argv[1], 'rb').read()
 ln = struct.unpack('<I', d[12:16])[0]
@@ -111,6 +112,26 @@ allx = [x for n in nodes if n.get('mesh') is not None for x in acc(js['meshes'][
 w = max(allx) - min(allx)
 if not 1.6 < w < 2.4:
     errs.append(f"ancho raro: {w:.2f} m (esperaba ~1.9)")
+
+# malla explotada: casi todo son bordes (p.ej. Edge Split aplicado)
+bnd = tot = 0
+for n in nodes:
+    if n.get('mesh') is None:
+        continue
+    prim = js['meshes'][n['mesh']]['primitives'][0]
+    idx = acci(prim['indices'])
+    uses = defaultdict(int)
+    for t in range(0, len(idx), 3):
+        for e in range(3):
+            a2, b2 = idx[t + e], idx[t + (e + 1) % 3]
+            uses[(a2, b2) if a2 < b2 else (b2, a2)] += 1
+    for c in uses.values():
+        tot += 1
+        if c == 1:
+            bnd += 1
+if tot and bnd / tot > 0.5:
+    print(f"⚠️  malla explotada: {100 * bnd / tot:.0f}% aristas de borde "
+          f"(¿Edge Split aplicado? En Blender: Select All + M > Merge by Distance)")
 
 if errs:
     print("❌ " + "\n❌ ".join(errs))

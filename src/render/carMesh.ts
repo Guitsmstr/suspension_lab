@@ -236,8 +236,8 @@ export class CarVisual {
    * piezas baratas por malla:
    * 1) casco invertido (misma geometría, `BackSide`, 3 % mayor): la
    *    silueta vista desde cualquier ángulo;
-   * 2) `EdgesGeometry` con umbral 35°: solo las aristas duras (pasos de
-   *    rueda, marcos, pliegues), no los ~60k segmentos de la triangulación.
+   * 2) aristas por normales suavizadas (ver `contourEdges`): solo las líneas
+   *    de verdad (pasos de rueda, marcos, pliegues), no la triangulación.
    *
    * El casco solo se pone en mallas cerradas y de cierto tamaño: en
    * superficies abiertas (cristales) o piezas finas lo taparía todo de negro.
@@ -260,7 +260,7 @@ export class CarVisual {
         mesh.add(hull);
       }
       const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(geo, 35),
+        CarVisual.contourEdges(geo, 40),
         CarVisual.contourLineMat,
       );
       mesh.add(edges);
@@ -275,6 +275,99 @@ export class CarVisual {
         }
       }
     }
+  }
+
+  /**
+   * Aristas para el contorno a partir de las NORMALES SUAVIZADAS del modelo
+   * (las que deja tu Weighted Normal), no de la geometría: en zonas lisas
+   * las normales apenas varían entre caras vecinas y la triangulación no se
+   * dibuja; en pliegues de verdad (pasos de rueda, marcos, ranuras) el salto
+   * supera el umbral y sí sale la línea.
+   *
+   * Las aristas se agrupan por POSICIÓN (no por índice): el exportador parte
+   * vértices donde las normales son duras, y esos gemelos coincidentes se
+   * juzgan por ángulo igual que las interiores (en liso se ocultan, en
+   * pliegue se dibujan una vez). Solo los bordes sin gemelo (labios de
+   * pasos, marcos, huecos: las líneas importantes) se dibujan siempre.
+   * Sin atributo de normales, se recurre a EdgesGeometry.
+   */
+  private static contourEdges(geo: THREE.BufferGeometry, angleDeg: number): THREE.BufferGeometry {
+    // Longitud mínima de segmento [m]: las terrazas del Tripo son tramos
+    // cortos sueltos; los pliegues de verdad son largos y conectados.
+    const MIN_LEN = 0.05;
+    const fallback = (): THREE.BufferGeometry => new THREE.EdgesGeometry(geo, angleDeg);
+    const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
+    const nor = geo.attributes.normal as THREE.BufferAttribute | undefined;
+    const index = geo.index;
+    if (!pos || !nor || !index) return fallback();
+    const idx = index.array;
+    const cosLim = Math.cos((angleDeg * Math.PI) / 180);
+    // Normal representativa por cara = promedio de sus normales de vértice.
+    const triCount = idx.length / 3;
+    const faceN: number[] = new Array(triCount * 3);
+    for (let t = 0; t < triCount; t++) {
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      for (let k = 0; k < 3; k++) {
+        const vi = idx[t * 3 + k];
+        x += nor.getX(vi);
+        y += nor.getY(vi);
+        z += nor.getZ(vi);
+      }
+      const l = Math.hypot(x, y, z) || 1;
+      faceN[t * 3] = x / l;
+      faceN[t * 3 + 1] = y / l;
+      faceN[t * 3 + 2] = z / l;
+    }
+    // Clave por posición (cuantizada a 0.1 mm): los gemelos partidos caen
+    // en la misma clave aunque tengan índices distintos.
+    const key = (vi: number): string =>
+      `${Math.round(pos.getX(vi) * 10000)},${Math.round(pos.getY(vi) * 10000)},${Math.round(pos.getZ(vi) * 10000)}`;
+    const segs = new Map<string, { a: number; b: number; faces: number[] }>();
+    for (let t = 0; t < triCount; t++) {
+      for (let e = 0; e < 3; e++) {
+        const a = idx[t * 3 + e];
+        const b = idx[t * 3 + ((e + 1) % 3)];
+        const ka = key(a);
+        const kb = key(b);
+        const k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+        let s = segs.get(k);
+        if (!s) {
+          s = { a, b, faces: [] };
+          segs.set(k, s);
+        }
+        if (!s.faces.includes(t)) s.faces.push(t);
+      }
+    }
+    const lines: number[] = [];
+    const push = (a: number, b: number): void => {
+      const dx = pos.getX(a) - pos.getX(b);
+      const dy = pos.getY(a) - pos.getY(b);
+      const dz = pos.getZ(a) - pos.getZ(b);
+      if (dx * dx + dy * dy + dz * dz < MIN_LEN * MIN_LEN) return;
+      lines.push(pos.getX(a), pos.getY(a), pos.getZ(a), pos.getX(b), pos.getY(b), pos.getZ(b));
+    };
+    for (const s of segs.values()) {
+      if (s.faces.length <= 1) {
+        push(s.a, s.b); // borde real: siempre
+      } else {
+        // Gemelos o interior: se dibuja si alguna pareja supera el umbral.
+        let hard = false;
+        for (let i = 0; i < s.faces.length && !hard; i++) {
+          for (let j = i + 1; j < s.faces.length && !hard; j++) {
+            const t1 = s.faces[i] * 3;
+            const t2 = s.faces[j] * 3;
+            const dot = faceN[t1] * faceN[t2] + faceN[t1 + 1] * faceN[t2 + 1] + faceN[t1 + 2] * faceN[t2 + 2];
+            if (dot < cosLim) hard = true;
+          }
+        }
+        if (hard) push(s.a, s.b);
+      }
+    }
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lines), 3));
+    return out;
   }
 
   /**
