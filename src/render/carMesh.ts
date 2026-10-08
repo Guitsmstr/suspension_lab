@@ -5,13 +5,14 @@
  *
  * Tres carrocerías (`sport` / `offroad` / `kwid`, ver `cars.ts`): el deportivo
  * actual, un pick-up de rally-raid más alto y el Kwid Outsider (cáscara
- * `kwid.glb` modelada en Blender con sus medidas reales).
+ * Tripo `kwid_tripo.glb` + ruedas `kwid_wheels.glb`).
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { Vehicle } from '../vehicle/vehicle';
 import { CARS, type CarId } from '../vehicle/cars';
-import { loadKwidBody, loadKwidProceduralBody, loadKwidRaw, loadSportBody, loadTeslaBody } from './sportBody';
+import { loadKwidBody, loadKwidProceduralBody, loadKwidRaw, loadKwidShell, loadSportBody, loadTeslaBody } from './sportBody';
+import type { KwidWheelPart } from './sportBody';
 
 const PAINT_SPORT = 0x2456d0;
 const PAINT_OFFROAD = 0xc96a1e;
@@ -22,6 +23,13 @@ const CALIPER = 0xd63b2f;
 
 /** Cuánta de la deflexión del neumático se traslada a la rueda visual [m]. */
 export const VISUAL_TIRE_DEFLECTION = 0.02;
+
+/**
+ * Muestra la suspensión procedural (muelles, amortiguadores y brazos de la
+ * doble horquilla). En `false` quedan ocultos pero la física los sigue
+ * simulando igual: sirve para vestir el coche solo con las cáscaras.
+ */
+const SHOW_SUSPENSION = false;
 
 class HelixCurve extends THREE.Curve<THREE.Vector3> {
   constructor(
@@ -171,14 +179,19 @@ export class CarVisual {
         }
       }
     } else if (carId === 'kwid') {
-      // Cáscara con sus propias ruedas y wires visibles (sin texturas).
-      // Si falla la descarga, se usa la procedural: el demo nunca se
-      // queda sin coche.
-      const raw = await loadKwidRaw();
-      if (raw) visual.attachRawBody(raw.body, raw.wheels, raw.droppedRims);
+      // Carrocería Tripo + ruedas generadas (`kwid_wheels.glb`, ver
+      // `scripts/kwid_wheels_export.py`). Si falla la descarga, las ruedas
+      // Tripo con llanta procedural; en último caso la procedural: el demo
+      // nunca se queda sin coche.
+      const shell = await loadKwidShell(CARS.kwid.wheelRadius);
+      if (shell) visual.attachKwidShell(shell.body, shell.wheels);
       else {
-        const body = (await loadKwidBody()) ?? (await loadKwidProceduralBody());
-        if (body) visual.attachSportBody(body);
+        const raw = await loadKwidRaw();
+        if (raw) visual.attachRawBody(raw.body, raw.wheels, raw.droppedRims);
+        else {
+          const body = (await loadKwidBody()) ?? (await loadKwidProceduralBody());
+          if (body) visual.attachSportBody(body);
+        }
       }
     }
     return visual;
@@ -212,6 +225,8 @@ export class CarVisual {
     proceduralRim = false,
   ): void {
     this.attachSportBody(body);
+    // Herrajes de freno modelados en la carrocería: al pivote de su esquina.
+    this.attachBrakeHardware(body);
     for (const w of wheels) {
       const front = w.name.includes('Front');
       const left = w.name.includes('Left'); // +X es la izquierda del coche
@@ -232,12 +247,97 @@ export class CarVisual {
   }
 
   /**
+   * Herrajes de freno modelados dentro de la carrocería (discos/pinzas del
+   * `glb`, p. ej. las cajitas junto a los bujes del Tesla): se cuelgan del
+   * pivote de su esquina para que dirijan con la rueda y sigan la
+   * suspensión sin girar con ella (`pivot`, no `spin`). Se detectan por
+   * nombre (`Brake*`, `Freno*`, `Disc*`, `Disco*`, `Caliper*`, `Pinza*`) o
+   * por proximidad (volumen pequeño pegado al buje): los números
+   * `TeslaBody.###` del exportador no son estables entre reexports, así que
+   * si modelas frenos nuevos conviene nombrarlos `Brake_*` en Blender.
+   */
+  private attachBrakeHardware(body: THREE.Group): void {
+    this.group.updateMatrixWorld(true);
+    const hubs = this.wheels.map((w) => w.pivot.getWorldPosition(new THREE.Vector3()));
+    const found: Array<{ mesh: THREE.Mesh; corner: number }> = [];
+    const center = new THREE.Vector3();
+    const size = new THREE.Vector3();
+    const bb = new THREE.Box3();
+    body.updateMatrixWorld(true);
+    for (const child of [...body.children]) {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) continue;
+      bb.setFromObject(mesh);
+      bb.getCenter(center);
+      bb.getSize(size);
+      let corner = -1;
+      let best = Infinity;
+      for (let i = 0; i < 4; i++) {
+        const d = center.distanceTo(hubs[i]);
+        if (d < best) {
+          best = d;
+          corner = i;
+        }
+      }
+      const named = /brake|freno|disco|^disc|caliper|pinza/i.test(mesh.name);
+      const nearHub = best < 0.25 && Math.max(size.x, size.y, size.z) < 0.3;
+      if (corner >= 0 && (named || nearHub)) found.push({ mesh, corner });
+    }
+    for (const { mesh, corner } of found) {
+      this.wheels[corner].pivot.attach(mesh);
+      this.addContour(mesh);
+    }
+  }
+
+  /**
+   * Kwid por piezas: la carrocería Tripo va al `bodyGroup` y cada rueda
+   * (`Wheel_*` + `Hub_*` de `kwid_wheels.glb`, ya centradas en el buje) se
+   * cuelga del
+   * `spin` de su esquina: dirigen y giran con la física real. El vestido
+   * procedural y la pinza se ocultan, y la suspensión procedural ya viene
+   * oculta (`SHOW_SUSPENSION`).
+   */
+  attachKwidShell(body: THREE.Group, wheels: KwidWheelPart[]): void {
+    this.attachSportBody(body);
+    this.attachBrakeHardware(body);
+    for (const w of wheels) {
+      // Sufijo `FL` / `FR` / `RL` / `RR` de `kwid_wheels.glb`.
+      const suffix = w.name.slice(-2);
+      const front = suffix[0] === 'F';
+      const left = suffix[1] === 'L';
+      const corner = this.wheels[(front ? 0 : 2) + (left ? 1 : 0)];
+      corner.dressing.visible = false;
+      corner.caliper.visible = false;
+      this.addContour(w.tire);
+      corner.spin.attach(w.tire);
+      if (w.rim) {
+        this.addContour(w.rim);
+        corner.spin.attach(w.rim);
+      }
+      // Disco de freno oscuro tras los radios: da contraste (si no, por
+      // los huecos se ve el paso pálido y el rin parece macizo). Va al
+      // pivote: dirige sin girar, como los herrajes del Tesla.
+      const sx = left ? 1 : -1;
+      const discGeo = new THREE.CylinderGeometry(0.23, 0.23, 0.03, 28);
+      discGeo.rotateZ(Math.PI / 2);
+      const disc = new THREE.Mesh(
+        discGeo,
+        new THREE.MeshStandardMaterial({ color: 0x23262b, metalness: 0.8, roughness: 0.5 }),
+      );
+      disc.position.set(-sx * 0.02, 0, 0);
+      this.addContour(disc);
+      corner.pivot.add(disc); // `add`, no `attach`: la pose ya es local al buje
+    }
+    this.addContour(this.bodyGroup);
+  }
+
+  /**
    * Contorno stickman sobre una cáscara (también vale para el fallback). Dos
    * piezas baratas por malla:
    * 1) casco invertido (misma geometría, `BackSide`, 3 % mayor): la
    *    silueta vista desde cualquier ángulo;
-   * 2) aristas por normales suavizadas (ver `contourEdges`): solo las líneas
-   *    de verdad (pasos de rueda, marcos, pliegues), no la triangulación.
+   * 2) `EdgesGeometry` con umbral 35°: solo las aristas duras (pasos de
+   *    rueda, marcos, pliegues), no los ~60k segmentos de la triangulación.
    *
    * El casco solo se pone en mallas cerradas y de cierto tamaño: en
    * superficies abiertas (cristales) o piezas finas lo taparía todo de negro.
@@ -260,7 +360,7 @@ export class CarVisual {
         mesh.add(hull);
       }
       const edges = new THREE.LineSegments(
-        CarVisual.contourEdges(geo, 40),
+        new THREE.EdgesGeometry(geo, 35),
         CarVisual.contourLineMat,
       );
       mesh.add(edges);
@@ -275,99 +375,6 @@ export class CarVisual {
         }
       }
     }
-  }
-
-  /**
-   * Aristas para el contorno a partir de las NORMALES SUAVIZADAS del modelo
-   * (las que deja tu Weighted Normal), no de la geometría: en zonas lisas
-   * las normales apenas varían entre caras vecinas y la triangulación no se
-   * dibuja; en pliegues de verdad (pasos de rueda, marcos, ranuras) el salto
-   * supera el umbral y sí sale la línea.
-   *
-   * Las aristas se agrupan por POSICIÓN (no por índice): el exportador parte
-   * vértices donde las normales son duras, y esos gemelos coincidentes se
-   * juzgan por ángulo igual que las interiores (en liso se ocultan, en
-   * pliegue se dibujan una vez). Solo los bordes sin gemelo (labios de
-   * pasos, marcos, huecos: las líneas importantes) se dibujan siempre.
-   * Sin atributo de normales, se recurre a EdgesGeometry.
-   */
-  private static contourEdges(geo: THREE.BufferGeometry, angleDeg: number): THREE.BufferGeometry {
-    // Longitud mínima de segmento [m]: las terrazas del Tripo son tramos
-    // cortos sueltos; los pliegues de verdad son largos y conectados.
-    const MIN_LEN = 0.05;
-    const fallback = (): THREE.BufferGeometry => new THREE.EdgesGeometry(geo, angleDeg);
-    const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
-    const nor = geo.attributes.normal as THREE.BufferAttribute | undefined;
-    const index = geo.index;
-    if (!pos || !nor || !index) return fallback();
-    const idx = index.array;
-    const cosLim = Math.cos((angleDeg * Math.PI) / 180);
-    // Normal representativa por cara = promedio de sus normales de vértice.
-    const triCount = idx.length / 3;
-    const faceN: number[] = new Array(triCount * 3);
-    for (let t = 0; t < triCount; t++) {
-      let x = 0;
-      let y = 0;
-      let z = 0;
-      for (let k = 0; k < 3; k++) {
-        const vi = idx[t * 3 + k];
-        x += nor.getX(vi);
-        y += nor.getY(vi);
-        z += nor.getZ(vi);
-      }
-      const l = Math.hypot(x, y, z) || 1;
-      faceN[t * 3] = x / l;
-      faceN[t * 3 + 1] = y / l;
-      faceN[t * 3 + 2] = z / l;
-    }
-    // Clave por posición (cuantizada a 0.1 mm): los gemelos partidos caen
-    // en la misma clave aunque tengan índices distintos.
-    const key = (vi: number): string =>
-      `${Math.round(pos.getX(vi) * 10000)},${Math.round(pos.getY(vi) * 10000)},${Math.round(pos.getZ(vi) * 10000)}`;
-    const segs = new Map<string, { a: number; b: number; faces: number[] }>();
-    for (let t = 0; t < triCount; t++) {
-      for (let e = 0; e < 3; e++) {
-        const a = idx[t * 3 + e];
-        const b = idx[t * 3 + ((e + 1) % 3)];
-        const ka = key(a);
-        const kb = key(b);
-        const k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-        let s = segs.get(k);
-        if (!s) {
-          s = { a, b, faces: [] };
-          segs.set(k, s);
-        }
-        if (!s.faces.includes(t)) s.faces.push(t);
-      }
-    }
-    const lines: number[] = [];
-    const push = (a: number, b: number): void => {
-      const dx = pos.getX(a) - pos.getX(b);
-      const dy = pos.getY(a) - pos.getY(b);
-      const dz = pos.getZ(a) - pos.getZ(b);
-      if (dx * dx + dy * dy + dz * dz < MIN_LEN * MIN_LEN) return;
-      lines.push(pos.getX(a), pos.getY(a), pos.getZ(a), pos.getX(b), pos.getY(b), pos.getZ(b));
-    };
-    for (const s of segs.values()) {
-      if (s.faces.length <= 1) {
-        push(s.a, s.b); // borde real: siempre
-      } else {
-        // Gemelos o interior: se dibuja si alguna pareja supera el umbral.
-        let hard = false;
-        for (let i = 0; i < s.faces.length && !hard; i++) {
-          for (let j = i + 1; j < s.faces.length && !hard; j++) {
-            const t1 = s.faces[i] * 3;
-            const t2 = s.faces[j] * 3;
-            const dot = faceN[t1] * faceN[t2] + faceN[t1 + 1] * faceN[t2 + 1] + faceN[t1 + 2] * faceN[t2 + 2];
-            if (dot < cosLim) hard = true;
-          }
-        }
-        if (hard) push(s.a, s.b);
-      }
-    }
-    const out = new THREE.BufferGeometry();
-    out.setAttribute('position', new THREE.BufferAttribute(new Float32Array(lines), 3));
-    return out;
   }
 
   /**
@@ -918,15 +925,18 @@ export class CarVisual {
       new THREE.MeshStandardMaterial({ color: 0xe8b23c, metalness: 0.85, roughness: 0.35 }),
     );
     spring.position.copy(hardpoint).add(springOffset);
+    spring.visible = SHOW_SUSPENSION;
     this.group.add(spring);
 
     const rodGeo = new THREE.CylinderGeometry(0.019, 0.019, SPRING_LEN, 12);
     const damperRod = new THREE.Mesh(rodGeo, this.metalMat);
+    damperRod.visible = SHOW_SUSPENSION;
     damperRod.position.copy(spring.position).add(new THREE.Vector3(0, -SPRING_LEN / 2, 0));
     this.group.add(damperRod);
 
     const bodyGeo = new THREE.CylinderGeometry(0.041, 0.041, SPRING_LEN * 0.62, 16);
     const damperBody = new THREE.Mesh(bodyGeo, this.trimMat);
+    damperBody.visible = SHOW_SUSPENSION;
     damperBody.position.copy(spring.position).add(new THREE.Vector3(0, -SPRING_LEN * 0.28, 0));
     this.group.add(damperBody);
 
@@ -943,6 +953,7 @@ export class CarVisual {
     ];
     for (const [from, to] of specs) {
       const mesh = new THREE.Mesh(armGeo, this.trimMat);
+      mesh.visible = SHOW_SUSPENSION;
       this.group.add(mesh);
       arms.push({ mesh, from, to });
     }

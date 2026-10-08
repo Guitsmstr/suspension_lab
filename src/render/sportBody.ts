@@ -15,6 +15,11 @@ const ASSET_URL = '/assets/cars/sport.glb';
 const TESLA_ASSET_URL = '/assets/cars/tesla.glb';
 const KWID_ASSET_URL = '/assets/cars/kwid_tripo.glb';
 const KWID_PROCEDURAL_URL = '/assets/cars/kwid.glb';
+/** Ruedas del Kwid: neumático `Wheel_*` + rin `Hub_*` (generadas por
+ * `scripts/kwid_wheels_export.py`: centradas en el buje, eje en Z). */
+const KWID_WHEELS_URL = '/assets/cars/kwid_wheels.glb';
+/** La carrocería Tripo trae los pasos 53 mm por delante de los bujes físicos. */
+const KWID_BODY_SHIFT_Z = -0.053;
 
 async function loadBodyFrom(url: string): Promise<THREE.Group | null> {
   let root: THREE.Group;
@@ -157,6 +162,132 @@ export function loadTeslaBody(): Promise<{
   droppedRims: boolean;
 } | null> {
   return loadRawBody(TESLA_ASSET_URL);
+}
+
+/** Rueda del Kwid por piezas: neumático (`Wheel_*`) + rin (`Hub_*`). */
+export interface KwidWheelPart {
+  name: string;
+  /** Neumático y rin (una o varias mallas: uno o dos materiales). */
+  tire: THREE.Object3D;
+  /** Rin separado; `null` cuando la rueda viene en una sola pieza. */
+  rim: THREE.Object3D | null;
+}
+
+/** Mallas bajo un nodo (el nodo puede ser malla o grupo multimaterial). */
+function collectWheelMeshes(node: THREE.Object3D): THREE.Mesh[] {
+  const out: THREE.Mesh[] = [];
+  node.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) out.push(o as THREE.Mesh);
+  });
+  return out;
+}
+
+/** Caja de un nodo ya rotado al frame del juego (geometrías clonadas). */
+function wheelNodeBox(node: THREE.Object3D, rot: THREE.Matrix4): THREE.Box3 | null {
+  const box = new THREE.Box3();
+  let found = false;
+  for (const m of collectWheelMeshes(node)) {
+    const geo = (m.geometry as THREE.BufferGeometry).clone();
+    geo.applyMatrix4(rot);
+    geo.computeBoundingBox();
+    box.union(geo.boundingBox!);
+    geo.dispose();
+    found = true;
+  }
+  return found ? box : null;
+}
+
+/**
+ * Viste una pieza (neumático o rin): clona sus mallas, las rota al frame
+ * del juego, las escala y las centra en el buje. Cada pieza se centra en
+ * su propia caja: rin y neumático quedan concéntricos aunque el modelo
+ * traiga desfases entre ellos.
+ */
+function dressWheelPart(node: THREE.Object3D, rot: THREE.Matrix4, s: number): THREE.Group | null {
+  const parts = collectWheelMeshes(node).map((m) => {
+    const geo = (m.geometry as THREE.BufferGeometry).clone();
+    geo.applyMatrix4(rot);
+    geo.scale(s, s, s);
+    geo.computeBoundingBox();
+    return { geo, mat: m.material };
+  });
+  if (parts.length === 0) return null;
+  const box = new THREE.Box3();
+  for (const p of parts) box.union(p.geo.boundingBox!);
+  const center = box.getCenter(new THREE.Vector3());
+  const group = new THREE.Group();
+  for (const p of parts) {
+    p.geo.translate(-center.x, -center.y, -center.z);
+    const mesh = new THREE.Mesh(p.geo, p.mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return group;
+}
+
+/**
+ * Cáscara Tripo sin sus ruedas + ruedas (`kwid_wheels.glb`, generadas por
+ * `scripts/kwid_wheels_export.py`: `Wheel_FL…` + `Hub_FL…`).
+ * El glb viene en frame Y-up del exportador (X=largo, Y=arriba, Z=ancho,
+ * eje de la rueda en Z): se rota −90° sobre Y al frame del juego
+ * (X=ancho, Y=arriba, Z=largo), se escala al diámetro físico y se centra
+ * en el buje (dirección sin excentricidad). La carrocería se desplaza en
+ * Z para que los pasos caigan sobre los bujes.
+ */
+export async function loadKwidShell(wheelRadius: number): Promise<{
+  body: THREE.Group;
+  wheels: KwidWheelPart[];
+} | null> {
+  let tripoRoot: THREE.Group;
+  let wheelsRoot: THREE.Group;
+  try {
+    const [tripoRes, wheelsRes] = await Promise.all([fetch(KWID_ASSET_URL), fetch(KWID_WHEELS_URL)]);
+    if (!tripoRes.ok || !wheelsRes.ok) return null;
+    const [tripoGltf, wheelsGltf] = await Promise.all([
+      new GLTFLoader().parseAsync(await tripoRes.arrayBuffer(), KWID_ASSET_URL),
+      new GLTFLoader().parseAsync(await wheelsRes.arrayBuffer(), KWID_WHEELS_URL),
+    ]);
+    tripoRoot = tripoGltf.scene as unknown as THREE.Group;
+    wheelsRoot = wheelsGltf.scene as unknown as THREE.Group;
+  } catch {
+    return null;
+  }
+
+  const body = new THREE.Group();
+  for (const child of [...tripoRoot.children]) {
+    if (!child.name.startsWith('Wheel')) body.add(child);
+  }
+  if (body.children.length === 0) return null;
+  body.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(body);
+  body.position.set(-(bb.min.x + bb.max.x) / 2, 0, KWID_BODY_SHIFT_Z);
+
+  const wheels: KwidWheelPart[] = [];
+  const rot = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
+  for (const suffix of ['FL', 'FR', 'RL', 'RR']) {
+    const tireNode = wheelsRoot.getObjectByName(`Wheel_${suffix}`);
+    if (!tireNode) return null;
+    // Escala por el diámetro del neumático; el rin hereda la misma para
+    // no romper la proporción modelada entre ambos.
+    const tireBox = wheelNodeBox(tireNode, rot);
+    if (!tireBox) return null;
+    const size = tireBox.getSize(new THREE.Vector3());
+    const s = (wheelRadius * 2) / Math.max(size.y, size.z);
+    const tire = dressWheelPart(tireNode, rot, s);
+    const rimNode = wheelsRoot.getObjectByName(`Hub_${suffix}`);
+    const rim = rimNode ? dressWheelPart(rimNode, rot, s) : null;
+    if (!tire) return null;
+    wheels.push({ name: `Wheel_${suffix}`, tire, rim });
+  }
+  body.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    }
+  });
+  return { body, wheels };
 }
 
 /** Cáscara procedural de respaldo (misma geometría lowpoly hecha a mano). */

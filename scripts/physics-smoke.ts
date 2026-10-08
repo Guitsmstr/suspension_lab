@@ -108,6 +108,8 @@ scenario('Estabilización en reposo', (_p, terrain, v) => {
   check('las 4 ruedas apoyan', v.cornerStates.every((s) => s.contact));
   check('recorrido cerca del estático', v.cornerStates.every((s) => Math.abs(s.s) < 0.015),
     v.cornerStates.map((s) => `${(s.s * 1000).toFixed(1)}mm`).join(' '));
+  check('ruedas quietas en reposo (fricción estática)', v.cornerStates.every((s) => Math.abs(s.wheelOmega) < 0.05),
+    v.cornerStates.map((s) => `${s.wheelOmega.toFixed(3)}rad/s`).join(' '));
   check('carga vertical razonable', v.cornerStates.every((s) => s.tireLoad > 2500 && s.tireLoad < 6500),
     v.cornerStates.map((s) => `${s.tireLoad.toFixed(0)}N`).join(' '));
 });
@@ -123,9 +125,10 @@ scenario('Aceleración en línea recta', (_p, _t, v) => {
   let peakKappa = 0;
   let slipSum = 0;
   let slipSamples = 0;
-  // 8 s: la recta de meta sube 2 m en los primeros 60 m y eso cuesta ~1 m/s;
-  // con un segundo más el coche supera los 22 m/s sin salir del asfalto.
-  const steps = Math.round(8 / DT);
+  // 10 s: la recta de meta sube 2 m en los primeros 60 m y eso cuesta ~1 m/s;
+  // desde parado honesto (sin pre-giro numérico de las ruedas) el 3er cambio
+  // necesita el segundo extra. Umbrales iguales, solo más ventana.
+  const steps = Math.round(10 / DT);
   for (let i = 0; i < steps; i++) {
     v.step(DT, { ...NO_INPUT, throttle: 0.85 });
     peakGLong = Math.max(peakGLong, v.telemetry.gLong);

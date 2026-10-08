@@ -26,9 +26,6 @@ car_tesla_model/
 *.blend
 *.blend1
 
-# Assets no referenciados por el código
-public/assets/cars/kwid_parts.*
-
 # Scripts temporales de depuración
 scripts/probe_tmp.ts
 

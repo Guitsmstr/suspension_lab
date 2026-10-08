@@ -230,8 +230,13 @@ async function boot(): Promise<void> {
       applyTrack(TRACK_ORDER[(TRACK_ORDER.indexOf(trackId) + 1) % TRACK_ORDER.length]);
     };
 
+    // Generación: si se cambia de coche dos veces seguidas antes de que
+    // termine la primera carga, la primera promesa queda obsoleta y NO debe
+    // montar su visual (si no, el visual fantasma queda en la escena).
+    let carGen = 0;
     const applyCar = (id: CarId): void => {
       void (async (): Promise<void> => {
+        const gen = ++carGen;
         carId = id;
         const spec = CARS[carId];
         vehicle.setCar(id);
@@ -240,7 +245,9 @@ async function boot(): Promise<void> {
         panel.setSprungMasses(vehicle.sprungMassFront, vehicle.sprungMassRear);
         panel.setCarLabel(spec.name);
         scene.remove(car.group);
-        car = await CarVisual.create(carId);
+        const next = await CarVisual.create(carId);
+        if (gen !== carGen) return; // obsoleto: otro cambio lo superó
+        car = next;
         scene.add(car.group);
         race.reset();
         // El 4x4 pisa más alto: se reaparece en el inicio del circuito activo

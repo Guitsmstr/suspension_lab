@@ -96,7 +96,7 @@ La cámara de persecución no se aleja más de un **5 %** de la distancia elegid
 
 | | ⚡ Tesla Model 3 | 🛻 Todoterreno 4x4 | 🚗 Kwid Outsider |
 | --- | --- | --- | --- |
-| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (Tripo `car_kwid_model/` → `kwid_tripo.glb`, estilo contorno) |
+| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (carrocería Tripo `car_kwid_model/` → `kwid_tripo.glb` + ruedas generadas `scripts/kwid_wheels_export.py` → `kwid_wheels.glb`, estilo contorno) |
 
 #### Iterar el modelo del Tesla
 El `.blend` (`car_tesla_model/`, ignorado por git) se convierte al `.glb` del

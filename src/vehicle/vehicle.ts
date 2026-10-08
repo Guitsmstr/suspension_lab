@@ -82,6 +82,9 @@ const AIR_DENSITY = 1.225;
 const DRAG_AREA = 0.72; // Cd·A [m²]
 const LIFT_AREA = 0.55; // Cl·A [m²]
 const ROLLING_RESISTANCE = 0.014;
+/** Por debajo de esta velocidad del punto de contacto la goma no patina:
+ * la rueda queda ligada a la rodadura (fricción estática) [m/s]. */
+const STATIC_LOCK_SPEED = 0.5;
 const MAX_BRAKE_TORQUE = 6400; // N·m totales
 /** Velocidad máxima marcha atrás [m/s] (~30 km/h, como una reversa real). */
 const MAX_REVERSE_SPEED = 8.5;
@@ -734,7 +737,15 @@ export class Vehicle {
         c.x < 0 ? -1 : 1,
       );
       let fx = f.fx;
-      if (Math.abs(vLong) > 0.3) fx -= ROLLING_RESISTANCE * rrMul * fTz * Math.sign(vLong);
+      // Resistencia a la rodadura también en parado: retiene en pendiente
+      // suave. Acotada para no invertir la velocidad en un paso (antes
+      // solo actuaba por encima de 0.3 m/s y el coche reptaba a 0.3 m/s
+      // eternamente en cuanto se honestó el giro de rueda).
+      const rrFull = ROLLING_RESISTANCE * rrMul * fTz;
+      if (rrFull > 0) {
+        const rrCap = (Math.abs(vLong) * (this.sprungMass / 4)) / dt;
+        fx -= Math.min(rrFull, rrCap) * Math.sign(vLong);
+      }
       const fy = f.fy;
 
       // --- giro de la rueda ---
@@ -750,6 +761,20 @@ export class Vehicle {
         const dOmega = (brakeTorque * dt) / c.wheelInertia;
         if (Math.abs(st.wheelOmega) <= dOmega) st.wheelOmega = 0;
         else st.wheelOmega -= Math.sign(st.wheelOmega) * dOmega;
+      }
+
+      // Fricción estática: casi parado, sin gas ni freno, la goma no
+      // patina — se impone la rodadura (omega = vLong/R). Sin esto, la
+      // rigidez longitudinal explícita (vRef acotado a 1.2) es inestable
+      // en parado y la rueda entra en ciclo límite: tiembla o gira sola
+      // con el coche quieto. Con gas, freno o velocidad (>0.5 m/s) actúa
+      // la dinámica normal: salidas, bloqueos y derrapes intactos.
+      if (
+        speed2d < STATIC_LOCK_SPEED &&
+        Math.abs(this.driveTorques[i]) < 1e-3 &&
+        brakeTorques[i] < 1e-3
+      ) {
+        st.wheelOmega = vLong / this.wheelRadius;
       }
 
       // --- aplicación de fuerzas al chasis ---

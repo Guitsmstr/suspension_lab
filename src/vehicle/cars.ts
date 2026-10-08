@@ -7,8 +7,9 @@
  *   vías ~1,58 m, ~258 kW; el preset de potencia lo deja en ~250 kW).
  * - `offroad`: un 4x4 de estilo baja (alto, pesado, ruedas grandes, 4WD).
  * - `kwid`: Renault Kwid 1.0 (datos: ~775 kg + conductor ≈ 820 kg, 50 kW/68 CV,
- *   batalla 2,422 m, vía 1,41 m — estrechada a 1,30 m por los pasos del
- *   modelo Tripo —, ruedas 165/70 R13, CdM alto de crossover económico).
+ *   batalla 2,422 m, vía 1,41 m — estrechada a 1,23 m por los pasos del
+ *   modelo Tripo (ruedas a ±0,615) —, ruedas 165/70 R13, CdM alto de
+ *   crossover económico).
  */
 import * as THREE from 'three';
 
@@ -177,7 +178,7 @@ export const CARS: Record<CarId, CarSpec> = {
     mass: 820,
     comHeight: 0.55,
     wheelbase: 2.42,
-    track: 1.3, // vía estrechada a los pasos del Tripo (±0.65)
+    track: 1.23, // vía estrechada a los pasos del Tripo (±0.615)
     wheelRadius: 0.31,
     unsprungFront: 30,
     unsprungRear: 28,
