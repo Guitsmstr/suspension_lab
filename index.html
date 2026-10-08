@@ -55,7 +55,9 @@
         top: 12px;
         right: 12px;
         width: 306px;
-        max-height: calc(100vh - 24px);
+        /* Termina por encima del minimapa + botón flotante (abajo a la derecha). */
+        max-height: calc(100vh - min(300px, 24vw) - 82px);
+        min-height: 120px;
         overflow-y: auto;
         background: var(--panel);
         border: 1px solid var(--panel-border);
@@ -243,11 +245,11 @@
         background: rgba(77, 163, 255, 0.3);
       }
 
-      /* Botón flotante para abrir el menú con el panel contraído */
+      /* Botón flotante para abrir el menú: encima del minimapa */
       #menu-fab {
         position: fixed;
         right: 12px;
-        bottom: 12px;
+        bottom: calc(min(300px, 24vw) + 24px);
         z-index: 14;
         width: 46px;
         height: 46px;
@@ -458,11 +460,12 @@
 
       #hud {
         position: fixed;
-        left: 12px;
+        left: 25%;
+        transform: translateX(-50%);
         bottom: 12px;
         padding: 6px 10px 8px;
         min-width: 0;
-        text-align: left;
+        text-align: center;
         background: transparent;
         border: none;
         backdrop-filter: none;
@@ -541,6 +544,51 @@
         letter-spacing: 0.3px;
         white-space: nowrap;
         z-index: 12;
+      }
+
+      /* ---------- Minimapa ---------- */
+      #minimap {
+        position: fixed;
+        right: 12px;
+        bottom: 12px;
+        width: min(300px, 24vw);
+        aspect-ratio: 1 / 1;
+        height: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        backdrop-filter: blur(14px);
+        pointer-events: none;
+      }
+
+      /* ---------- Telemetría separada ---------- */
+      #telemetry-panel {
+        position: fixed;
+        top: 12px;
+        right: 330px;
+        width: 280px;
+        max-height: calc(100vh - 24px);
+        overflow-y: auto;
+        background: var(--panel);
+        border: 1px solid var(--panel-border);
+        border-radius: 14px;
+        padding: 14px 14px 16px;
+        backdrop-filter: blur(14px);
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+      }
+
+      #telemetry-panel > h2 {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 1.1px;
+        color: var(--accent);
+        margin: 0 0 8px;
+        font-weight: 600;
+      }
+
+      #telemetry-panel .group {
+        margin-top: 10px;
       }
 
       /* ---------- Cuenta atrás al reiniciar ---------- */
@@ -746,6 +794,14 @@
       </div>
     </div>
     <button id="menu-fab" title="Abrir menú (M)">☰</button>
+    <canvas id="minimap" width="320" height="320"></canvas>
+
+    <div id="telemetry-panel">
+      <h2>Telemetría</h2>
+      <div class="telemetry" id="telemetry"></div>
+      <div style="height: 10px"></div>
+      <div id="wheel-bars"></div>
+    </div>
 
     <div id="panel">
       <div class="panel-head">
@@ -756,12 +812,6 @@
         <button id="btn-collapse" title="Contraer panel (O)">–</button>
       </div>
       <div id="params"></div>
-      <div class="group">
-        <h2>Telemetría</h2>
-        <div class="telemetry" id="telemetry"></div>
-        <div style="height: 10px"></div>
-        <div id="wheel-bars"></div>
-      </div>
       <div class="buttons">
         <button id="btn-reset">Reiniciar (R)</button>
         <button id="btn-pause">Pausa (P)</button>

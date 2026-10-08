@@ -246,6 +246,9 @@ export class Panel {
     const panel = document.getElementById('panel');
     if (!panel) return false;
     const collapsed = panel.classList.toggle('collapsed');
+    // La telemetría vive en su propia ventana, pero se muestra y oculta con
+    // el menú de suspensiones.
+    document.getElementById('telemetry-panel')?.classList.toggle('hidden', collapsed);
     const btn = document.getElementById('btn-collapse');
     if (btn) {
       btn.textContent = collapsed ? '+' : '–';

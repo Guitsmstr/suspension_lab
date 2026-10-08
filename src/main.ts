@@ -25,6 +25,7 @@ import {
 } from './world/track';
 import { CarVisual } from './render/carMesh';
 import { CameraRig, type CameraMode } from './render/cameraRig';
+import { Minimap } from './render/minimap';
 import { RaceDirector } from './world/race';
 import { Panel } from './ui/panel';
 import { Menu } from './ui/menu';
@@ -48,6 +49,7 @@ export interface SimDebug {
   input: Input;
   params: ParamStore;
   cameraRig: CameraRig;
+  minimap: Minimap;
   scenery: SceneryHandle;
   trackMode: () => TrackMode;
   trackId: () => TrackId;
@@ -183,6 +185,10 @@ async function boot(): Promise<void> {
 
     const input = new Input();
     const cameraRig = new CameraRig();
+    const minimapCanvas = document.getElementById('minimap') as HTMLCanvasElement | null;
+    if (!minimapCanvas) throw new Error('No se encuentra el canvas #minimap en index.html');
+    const minimap = new Minimap(minimapCanvas);
+    const fwdMini = new THREE.Vector3();
     const helpEl = document.getElementById('help');
     let paused = false;
 
@@ -229,6 +235,7 @@ async function boot(): Promise<void> {
       if (trackBadge) trackBadge.textContent = def.badge;
       panel.setTrackLabel(def.name);
       race.setTrack(def);
+      minimap.setTrack(def);
       if (teleport) {
         const s = trackSpawn(def);
         vehicle.setSpawn(s.x, s.z, s.yaw);
@@ -303,6 +310,7 @@ async function boot(): Promise<void> {
       input,
       params,
       cameraRig,
+      minimap,
       scenery,
       trackMode: () => trackId,
       trackId: () => trackId,
@@ -443,6 +451,8 @@ async function boot(): Promise<void> {
 
         car.update(vehicle, dt, renderAlpha);
         cameraRig.apply(camera, vehicle, dt, renderAlpha);
+        fwdMini.set(0, 0, 1).applyQuaternion(vehicle.quaternion);
+        minimap.update(vehicle.position.x, vehicle.position.z, fwdMini.x, fwdMini.z);
         followSun(env, car.group.position);
         panel.update(vehicle.telemetry);
 

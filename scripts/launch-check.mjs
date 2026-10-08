@@ -158,6 +158,36 @@ check('el coche acelera con W', Number.isFinite(speedAfter) && speedAfter > 10 &
   `${before.hud} → ${after.hud} km/h · avance ${advanced.toFixed(1)} m`);
 await page.screenshot({ path: `${OUT}/03-driving.png` });
 
+// --- 3b. HUD a 1/4 de pantalla y minimapa abajo a la derecha ---
+const hudQ = await page.evaluate(() => {
+  const r = document.getElementById('hud')?.getBoundingClientRect();
+  if (!r) return null;
+  return { cx: r.left + r.width / 2, vw: window.innerWidth };
+});
+check('velocidad centrada a 1/4 de pantalla', hudQ !== null && Math.abs(hudQ.cx - hudQ.vw * 0.25) < hudQ.vw * 0.05,
+  JSON.stringify(hudQ));
+const mini = await page.evaluate(() => {
+  const c = document.getElementById('minimap');
+  if (!c) return null;
+  const r = c.getBoundingClientRect();
+  return {
+    w: Math.round(r.width),
+    h: Math.round(r.height),
+    right: Math.round(window.innerWidth - r.right),
+    bottom: Math.round(window.innerHeight - r.bottom),
+  };
+});
+check('minimapa visible abajo a la derecha', mini !== null && mini.w > 100 && mini.h > 100 && mini.right < 30 && mini.bottom < 30,
+  JSON.stringify(mini));
+const overlap = await page.evaluate(() => {
+  const p = document.getElementById('panel')?.getBoundingClientRect();
+  const m = document.getElementById('minimap')?.getBoundingClientRect();
+  if (!p || !m) return null;
+  return { panelBottom: Math.round(p.bottom), miniTop: Math.round(m.top) };
+});
+check('el panel no tapa el minimapa', overlap !== null && overlap.panelBottom <= overlap.miniTop + 2,
+  JSON.stringify(overlap));
+
 // --- 4b. la cámara no se aleja más del 5 % al acelerar ---
 // A 33 km/h el retardo del suavizado la dejaría ~2 m atrás (+26 %); el tope lo impide.
 const camChase = await page.evaluate(() => {
@@ -368,7 +398,16 @@ check('la cáscara no cuelga bajo el chasis', Math.abs(bodyDrop) < 0.05, `${(bod
 
 // --- 5h. menú con M: garaje, circuitos y cámara ---
 await page.keyboard.press('m');
-await page.waitForTimeout(300);
+// A 3-5 fps por software 300 ms fijos no bastan: la pulsación se procesa en
+// el siguiente fotograma. Se espera a la apertura real como en el resto.
+try {
+  await page.waitForFunction(
+    () => !document.getElementById('menu')?.classList.contains('hidden'),
+    { timeout: 4000 },
+  );
+} catch {
+  // se deja que el check falle con el estado real
+}
 const menuState = await page.evaluate(() => ({
   open: !document.getElementById('menu')?.classList.contains('hidden'),
   cars: document.querySelectorAll('#menu-cars .menu-card').length,
@@ -416,16 +455,20 @@ await page.waitForTimeout(600);
 const collapsed = await page.evaluate(() => ({
   cls: document.getElementById('panel')?.classList.contains('collapsed') ?? false,
   hidden: getComputedStyle(document.getElementById('params')).display === 'none',
+  teleHidden: getComputedStyle(document.getElementById('telemetry-panel')).display === 'none',
 }));
 check('O contrae el panel', collapsed.cls && collapsed.hidden, JSON.stringify(collapsed));
+check('O oculta la telemetría con el panel', collapsed.teleHidden, JSON.stringify(collapsed));
 await page.screenshot({ path: `${OUT}/05-collapsed.png` });
 await page.keyboard.press('o');
 await page.waitForTimeout(600);
 const restored = await page.evaluate(() => ({
   cls: document.getElementById('panel')?.classList.contains('collapsed') ?? true,
   shown: getComputedStyle(document.getElementById('params')).display !== 'none',
+  teleShown: getComputedStyle(document.getElementById('telemetry-panel')).display !== 'none',
 }));
 check('O restaura el panel', !restored.cls && restored.shown, JSON.stringify(restored));
+check('O restaura la telemetría con el panel', restored.teleShown, JSON.stringify(restored));
 
 // --- 5b. vista de órbita para revisar el coche en tres cuartos ---
 // (la entrada es por flanco: hay que dejar pasar un fotograma entre pulsaciones)
