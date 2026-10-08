@@ -84,7 +84,7 @@ lentas:
 
 | Circuito | Superficie | Trazado | Largo / ancho |
 | --- | --- | --- | --- |
-| **🏁 Mónaco GP** | asfalto | gran anillo exterior: recta de meta de 190 m, subida este, esses, recta norte, chicane y horquilla oeste | ~810 m · 8 m |
+| **🏁 Barranquilla** | asfalto | anillo en B dibujado por el usuario por todo el mapa: perimetral rápida e interior técnico | ~2000 m · 10,8 m |
 | **🛣 Interlagos Mini** | asfalto | mixto centro-este: S inicial, curva ciega, exterior a fondo, horquilla alta y bajada | ~410 m · 7 m |
 | **🏜 Baja Whoops** | tierra | rápida oeste con la recta de badenes como tramo de saltos y cerrada al fondo | ~450 m · 6 m |
 | **🏜 Estadio Rallycross** | tierra | técnico centro-oeste: esses, horquilla alta y bajada sin respiro | ~290 m · 5,5 m |

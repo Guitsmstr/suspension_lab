@@ -23,6 +23,7 @@ import {
   trackCenterline,
   trackLength,
   trackSpawn,
+  type TrackId,
 } from '../src/world/track';
 import { rideMetrics, FRONT_KINEMATICS, REAR_KINEMATICS } from '../src/vehicle/suspension';
 import { tireForces, CAMBER_STIFFNESS } from '../src/vehicle/tire';
@@ -36,6 +37,19 @@ declare const process: { exit(code: number): never };
 
 const DT = 1 / 300;
 const NO_INPUT = { throttle: 0, brake: 0, steer: 0, handbrake: false };
+/**
+ * Sonda de hierba abierta para las pruebas de suelo blando: claro sin
+ * calzadas con ≥12 m de hierba en un pasillo de 60 m hacia el sur
+ * (las maniobras arrancan mirando al +z). Revisar si cambia el mapa.
+ */
+const GRASS_X = -104;
+const GRASS_Z = -112;
+/**
+ * Sonda para el derrape grande: ese trompo deriva ~70 m al oeste (-x),
+ * así que necesita un claro alargado este-oeste en vez del pasillo al sur.
+ */
+const DRIFT_X = -40;
+const DRIFT_Z = -100;
 
 interface Input {
   throttle: number;
@@ -118,7 +132,7 @@ scenario('Estabilización en reposo', (_p, terrain, v) => {
 
 // ------------------------------------------------------------- 2. aceleración
 scenario('Aceleración en línea recta', (_p, _t, v) => {
-  // En la recta de meta de Mónaco (asfalto): medir el tren motriz exige
+  // En la recta de meta de Barranquilla (asfalto): medir el tren motriz exige
   // agarre bueno; en hierba (μ≈0.4) un trasera patina, como debe ser.
   const s = trackSpawn(TRACKS.monaco);
   v.setSpawn(s.x, s.z, s.yaw);
@@ -162,8 +176,8 @@ scenario('Aceleración en línea recta', (_p, _t, v) => {
 scenario('En hierba el trasera patina al acelerar a fondo', (_p, terrain, v) => {
   // Fuera de pista (hierba, μ≈0.4) el mismo acelerón debe degradarse:
   // menos velocidad y más patinaje que en asfalto. Es física, no un bug.
-  v.setSpawn(120, 100);
-  const mu = terrain.surfaceMuAt ? terrain.surfaceMuAt(120, 100) : 1;
+  v.setSpawn(GRASS_X, GRASS_Z);
+  const mu = terrain.surfaceMuAt ? terrain.surfaceMuAt(GRASS_X, GRASS_Z) : 1;
   run(v, 1, NO_INPUT);
   run(v, 6, { ...NO_INPUT, throttle: 1 });
 
@@ -498,8 +512,9 @@ scenario('Las calzadas ciñen el terreno y caben en el mapa', (_p, terrain, _v) 
     }
 
     // Trazado interesante y conducible: ni óvalo soso ni horquillas imposibles.
+    // El tope (2500 m) cubre la Barranquilla de ~2 km por todo el mapa.
     const len = trackLength(def);
-    check(`trazado ${def.name}: longitud de circuito`, len > 250 && len < 1200,
+    check(`trazado ${def.name}: longitud de circuito`, len > 250 && len < 2500,
       `${len.toFixed(0)} m`);
     const s = trackSpawn(def);
     check(`trazado ${def.name}: salida dentro del mapa`,
@@ -554,7 +569,29 @@ scenario('El terreno esculpido nunca asoma por las calzadas', (p, terrain, _v) =
   for (const r of [0, 1, 2]) {
     p.set('roughness', r);
     const carve = makeTrackCarve(terrain);
+    // Ejes para detectar cruces entre calzadas (no dependen de la rugosidad).
+    const axes = new Map<TrackId, Array<{ x: number; z: number }>>();
+    for (const id of TRACK_ORDER) axes.set(id, trackCenterline(TRACKS[id], 600));
+    // ¿El punto cae dentro de la cinta de OTRO trazado? Ahí hay carretera
+    // sobre carretera (sin puentes en el juego): la malla sirve a la más
+    // alta y la garantía de "hierba por debajo" solo aplica a la cinta
+    // superior, que sí tapa. Se excluyen esos puntos (+1 m por el paso del
+    // muestreo del eje); fuera de los cruces la garantía sigue intacta.
+    const underOtherRoad = (id: TrackId, x: number, z: number): boolean => {
+      for (const id2 of TRACK_ORDER) {
+        if (id2 === id) continue;
+        const hw2 = TRACKS[id2].width / 2 + 1;
+        const cl = axes.get(id2) as Array<{ x: number; z: number }>;
+        for (let k = 0; k < cl.length; k += 2) {
+          const dx = x - cl[k].x;
+          const dz = z - cl[k].z;
+          if (dx * dx + dz * dz < hw2 * hw2) return true;
+        }
+      }
+      return false;
+    };
     let minGap = Infinity;
+    let minGapAt = '';
     let maxLipNormal = 0;
     let maxLipWhoops = 0;
     for (const id of TRACK_ORDER) {
@@ -575,10 +612,14 @@ scenario('El terreno esculpido nunca asoma por las calzadas', (p, terrain, _v) =
           const o = frac * hw;
           const x = c.x + sx * o;
           const z = c.z + sz * o;
+          if (underOtherRoad(id, x, z)) continue;
           const road = carve.roadHeight(x, z);
           if (road === null) continue;
           const gap = road - meshSurfaceAt(carve, x, z);
-          minGap = Math.min(minGap, gap);
+          if (gap < minGap) {
+            minGap = gap;
+            minGapAt = `[${x.toFixed(1)}, ${z.toFixed(1)}] (eje ${def.id})`;
+          }
           if (Math.abs(frac) > 0.9) {
             // Franja de badenes (coherente con terrain.ts): donde el terreno
             // ondula a propósito el hombro no se percibe.
@@ -590,7 +631,7 @@ scenario('El terreno esculpido nunca asoma por las calzadas', (p, terrain, _v) =
       }
     }
     check(`rugosidad ${r}: la hierba no asoma por la pista`, minGap > 0.003,
-      `holgura mín ${(minGap * 1000).toFixed(1)} mm`);
+      `holgura mín ${(minGap * 1000).toFixed(1)} mm en ${minGapAt}`);
     // El borde debe bajar en pendiente, no en peldaño: en llano la holgura es
     // la mínima (2 cm) y crece con la curvatura local (la cuerda de la malla
     // se levanta sobre la cinta en los valles). En la franja de badenes la
@@ -708,10 +749,22 @@ scenario('Sin ringing del giro de rueda al rodar con freno motor', (p, _t, v) =>
   // límite: ringing de 120-150 Hz por debajo de 2 m/s con |κ| ~ 0,03 y
   // aceleraciones alternas de más de 1 g. Ahora la κ va amortiguada.
   // Terreno plano: aquí se mide el modo numérico, no la excitación del terreno.
+  // Se rueda por la recta oeste de Barranquilla (asfalto, 190 m): el carril
+  // de tierra/hierba mete su propia dinámica de suelo blando en la medida.
   p.set('roughness', 0);
+  const ms = trackSpawn(TRACKS.monaco);
+  v.setSpawn(ms.x, ms.z, ms.yaw);
   let throttle = 0;
   for (let i = 0; i < 300 * 20 && v.velocity.z < 7.8; i++) {
     throttle = Math.max(0, Math.min(1, throttle + (8 - v.velocity.z) * 0.02));
+    v.step(DT, { ...NO_INPUT, throttle });
+  }
+  // Se suelta el gas en rampa (1,5 s) en vez de cortarlo de golpe: tras un
+  // acelerón con patinaje, el volante motor guarda inercia y un corte
+  // seco la descarga de golpe sobre el coche (empujón real, no ringing).
+  // Aquí se mide la rodadura posterior, no el transitorio de soltar el gas.
+  for (let i = 0; i < Math.round(1.5 / DT); i++) {
+    throttle = Math.max(0, throttle - DT / 1.5);
     v.step(DT, { ...NO_INPUT, throttle });
   }
   run(v, 1, NO_INPUT); // transitorio de soltar el gas fuera de la medición
@@ -875,17 +928,17 @@ scenario('Ley de carga potencial del neumático', (_p, _t, _v) => {
 scenario('El agarre depende de la superficie', (_p, terrain, _v) => {
   const muAt = (x: number, z: number): number =>
     terrain.surfaceMuAt ? terrain.surfaceMuAt(x, z) : 1;
-  const monaco = trackSpawn(TRACKS.monaco);
+  const meta = trackSpawn(TRACKS.monaco);
   const baja = trackSpawn(TRACKS.baja);
 
-  check('la meta de Mónaco es asfalto', muAt(monaco.x, monaco.z) > 0.95,
-    `μ=${muAt(monaco.x, monaco.z).toFixed(2)}`);
+  check('la meta de Barranquilla es asfalto', muAt(meta.x, meta.z) > 0.95,
+    `μ=${muAt(meta.x, meta.z).toFixed(2)}`);
   check('la salida de Baja es tierra', muAt(baja.x, baja.z) > 0.5 && muAt(baja.x, baja.z) < 0.7,
     `μ=${muAt(baja.x, baja.z).toFixed(2)}`);
   check('el paddock es asfalto', muAt(0, 0) > 0.95, `μ=${muAt(0, 0).toFixed(2)}`);
-  check('el campo es hierba', muAt(120, 100) < 0.5, `μ=${muAt(120, 100).toFixed(2)}`);
+  check('el campo es hierba', muAt(GRASS_X, GRASS_Z) < 0.5, `μ=${muAt(GRASS_X, GRASS_Z).toFixed(2)}`);
   check('asfalto > tierra > hierba',
-    muAt(monaco.x, monaco.z) > muAt(baja.x, baja.z) && muAt(baja.x, baja.z) > muAt(120, 100));
+    muAt(meta.x, meta.z) > muAt(baja.x, baja.z) && muAt(baja.x, baja.z) > muAt(GRASS_X, GRASS_Z));
 });
 
 // --------------------------------------- 6e. pico de G = μ (alce)
@@ -912,7 +965,7 @@ scenario('El pico de G lateral iguala al agarre (asfalto vs hierba)', (p, terrai
   };
   const s = trackSpawn(TRACKS.monaco);
   const gAsphalt = runMoose(s.x, s.z, s.yaw);
-  const gGrass = runMoose(120, 100, 0);
+  const gGrass = runMoose(GRASS_X, GRASS_Z, 0);
 
   check('en asfalto el pico roza μ (≈1 g)', gAsphalt > 0.8 && gAsphalt < 1.4,
     `pico ${gAsphalt.toFixed(2)} g (compuesto ${p.get('tireMu')})`);
@@ -1029,7 +1082,7 @@ scenario('Los cambios cortan el par', () => {
 });
 
 scenario('Balance en curva: subviraje en régimen medio', (p, _t, _v) => {
-  // En la recta de Mónaco a 12 m/s con volante fijo (demanda ≈0,7 g), los
+  // En la recta de Barranquilla a 12 m/s con volante fijo (demanda ≈0,7 g), los
   // tres coches deben ir de morro (alpha delantero > trasero) y sin
   // insinuar el trompo: es el balance seguro de un turismo de calle.
   const s = trackSpawn(TRACKS.monaco);
@@ -1104,7 +1157,7 @@ scenario('Recuperación de derrape con contravolante', (p, terrain, _v) => {
   ): { b0: number; b1: number; peak: number } => {
     p.applyPreset(CARS.sport.preset);
     const v = new Vehicle(p, terrain, undefined, 'sport');
-    v.setSpawn(120, 100, 0);
+    v.setSpawn(DRIFT_X, DRIFT_Z, 0);
     v.velocity.set(0, 0, 10);
     run(v, 0.5, { ...NO_INPUT, throttle: 0.3 });
     run(v, powerTime, { throttle: 1, brake: 0, steer: 0.25, handbrake: false });
@@ -1152,7 +1205,7 @@ scenario('El suelo blando frena y hunde', (p, _t, v) => {
     return a - v.telemetry.speed;
   };
   const dropAsphalt = coast(0, 0);
-  const dropGrass = coast(120, 100);
+  const dropGrass = coast(GRASS_X, GRASS_Z);
 
   const settle = (x: number, z: number): number => {
     v.setSpawn(x, z, 0);
@@ -1160,7 +1213,7 @@ scenario('El suelo blando frena y hunde', (p, _t, v) => {
     return Math.max(...v.cornerStates.map((s) => s.tireDeflection));
   };
   const deflAsphalt = settle(0, 0);
-  const deflGrass = settle(120, 100);
+  const deflGrass = settle(GRASS_X, GRASS_Z);
 
   check('valores finitos', isFiniteVehicle(v));
   check('en hierba retiene ~el doble que en asfalto', dropGrass > dropAsphalt * 1.8,

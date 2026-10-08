@@ -4,9 +4,9 @@
  * Cuatro trazados en dos superficies que usan casi todo el mapa (±140 m):
  *
  * - Asfalto:
- *   · `monaco` — "Mónaco GP" (~800 m): gran anillo exterior con rectas
- *     rápidas al sur y al norte, esses en el este, chicane en la recta de
- *     meta y horquilla lenta al oeste.
+ *   · `monaco` — "Barranquilla" (~2000 m): anillo en B dibujado por el
+ *     usuario por todo el mapa, con perimetral rápida e interior técnico
+ *     (id interno histórico `monaco`; 9 m de ancho, salida en la recta oeste).
  *   · `interlagos` — "Interlagos Mini" (~410 m): mixto centro-este con S
  *     inicial, curva ciega, horquilla y subida.
  * - Tierra:
@@ -52,6 +52,8 @@ export interface TrackDef {
   points: Array<[number, number]>;
   /** Ancho de la calzada [m]. */
   width: number;
+  /** Rugosidad del terreno al entrar al circuito (si se define). */
+  defaultRoughness?: number;
   /** Líneas de borde blancas (solo asfalto). */
   edgeLines: boolean;
 }
@@ -59,35 +61,221 @@ export interface TrackDef {
 export const TRACKS: Record<TrackId, TrackDef> = {
   monaco: {
     id: 'monaco',
-    name: 'Mónaco GP',
+    name: 'Barranquilla',
     surface: 'asfalto',
-    inspiration: 'Circuito de Mónaco · réplica ≈ 1:6',
-    description: 'Anillo exterior: rectas rápidas, esses, chicane y horquilla.',
-    badge: '🏁 Mónaco GP · asfalto',
+    inspiration: 'Trazado custom · dibujo del usuario',
+    description: 'Anillo en B de ~2 km por todo el mapa: perimetral rápida e interior técnico.',
+    badge: '🏁 Barranquilla · asfalto',
+    // Trazado dibujado a mano (.launch/espacio_para_dibujar.svg): 200 vértices
+    // cada ~10 m con salida en mitad de la recta oeste (la más larga).
+    // Se conserva el id interno 'monaco' para no tocar física, crono ni
+    // tests; lo visible es Barranquilla.
     points: [
-      [-100, -100], // recta de meta (salida, 190 m limpios)
-      [-30, -108],
-      [40, -112], // recta sur rápida
-      [90, -100],
-      [115, -60], // subida este
-      [118, 2], // bajada este
-      [108, 50],
-      [84, 84], // esses del este
-      [42, 100],
-      [-8, 106], // recta norte rápida
-      [-30, 100], // chicane norte
-      [-46, 92],
-      [-64, 90],
-      [-98, 74], // curvón noroeste
-      [-128, 66],
-      [-140, 52], // horquilla (la más lenta)
-      [-126, 38],
-      [-133, -12],
-      [-122, -58], // bajada oeste
-      [-95, -92], // (a la meta)
+      [-136.2, 8.9],
+      [-136.3, -1.1],
+      [-136.4, -11.1],
+      [-136.5, -21.1],
+      [-136.5, -31.2],
+      [-136.5, -41.2],
+      [-136.4, -51.2],
+      [-136.3, -61.2],
+      [-136.1, -71.2],
+      [-135.8, -81.2],
+      [-135.4, -91.2],
+      [-134.8, -101.2],
+      [-133.9, -111.2],
+      [-131.7, -121.0],
+      [-125.0, -128.3],
+      [-116.3, -133.2],
+      [-106.8, -136.5],
+      [-97.0, -138.6],
+      [-87.1, -139.8],
+      [-77.1, -140.0],
+      [-67.1, -140.0],
+      [-57.1, -140.0],
+      [-47.1, -139.7],
+      [-37.1, -138.7],
+      [-27.2, -137.3],
+      [-17.4, -135.3],
+      [-8.0, -132.0],
+      [0.5, -126.7],
+      [6.2, -118.6],
+      [7.7, -108.7],
+      [6.6, -98.8],
+      [4.4, -89.0],
+      [2.5, -79.2],
+      [0.0, -69.5],
+      [-5.2, -61.0],
+      [-13.5, -55.5],
+      [-23.0, -52.4],
+      [-32.8, -50.5],
+      [-42.7, -49.0],
+      [-52.6, -47.1],
+      [-62.3, -44.8],
+      [-71.8, -41.7],
+      [-80.8, -37.2],
+      [-88.9, -31.4],
+      [-96.5, -24.8],
+      [-103.2, -17.4],
+      [-108.6, -9.0],
+      [-112.5, 0.2],
+      [-114.9, 9.9],
+      [-116.0, 19.9],
+      [-116.0, 29.9],
+      [-114.9, 39.9],
+      [-112.9, 49.7],
+      [-110.7, 59.4],
+      [-110.6, 69.4],
+      [-110.4, 79.4],
+      [-108.3, 89.2],
+      [-103.2, 97.7],
+      [-95.2, 103.8],
+      [-85.9, 107.3],
+      [-76.1, 109.2],
+      [-66.4, 107.3],
+      [-58.2, 101.6],
+      [-51.4, 94.3],
+      [-45.3, 86.3],
+      [-39.8, 77.9],
+      [-34.7, 69.3],
+      [-30.0, 60.5],
+      [-25.4, 51.6],
+      [-21.0, 42.6],
+      [-16.8, 33.5],
+      [-12.7, 24.3],
+      [-8.7, 15.1],
+      [-4.8, 5.9],
+      [-1.0, -3.3],
+      [2.8, -12.6],
+      [6.5, -21.9],
+      [10.2, -31.2],
+      [13.9, -40.5],
+      [17.5, -49.9],
+      [21.2, -59.2],
+      [24.8, -68.5],
+      [28.5, -77.8],
+      [32.3, -87.1],
+      [36.2, -96.3],
+      [40.2, -105.5],
+      [44.5, -114.6],
+      [49.5, -123.3],
+      [56.5, -130.3],
+      [65.2, -135.2],
+      [74.7, -138.2],
+      [84.7, -139.2],
+      [94.6, -137.9],
+      [103.9, -134.2],
+      [111.8, -128.2],
+      [117.8, -120.2],
+      [121.2, -110.8],
+      [123.2, -101.0],
+      [124.7, -91.1],
+      [126.1, -81.2],
+      [127.3, -71.2],
+      [128.4, -61.3],
+      [129.4, -51.3],
+      [130.4, -41.3],
+      [131.2, -31.3],
+      [132.0, -21.3],
+      [132.6, -11.4],
+      [133.2, -1.4],
+      [133.6, 8.7],
+      [133.8, 18.7],
+      [133.6, 28.7],
+      [133.3, 38.7],
+      [133.1, 48.7],
+      [132.8, 58.7],
+      [132.4, 68.7],
+      [131.7, 78.7],
+      [130.6, 88.7],
+      [129.0, 98.6],
+      [126.5, 108.3],
+      [122.9, 117.6],
+      [117.5, 126.0],
+      [109.7, 132.2],
+      [100.1, 134.7],
+      [90.0, 134.8],
+      [80.1, 133.8],
+      [70.2, 132.0],
+      [60.5, 129.8],
+      [50.8, 127.2],
+      [41.6, 123.3],
+      [33.5, 117.3],
+      [27.0, 109.8],
+      [22.1, 101.1],
+      [19.1, 91.5],
+      [18.3, 81.6],
+      [19.8, 71.7],
+      [23.9, 62.6],
+      [29.9, 54.6],
+      [36.5, 47.1],
+      [43.4, 39.7],
+      [50.2, 32.4],
+      [56.9, 25.0],
+      [63.3, 17.3],
+      [69.5, 9.4],
+      [75.4, 1.3],
+      [81.0, -7.0],
+      [86.3, -15.5],
+      [91.7, -23.9],
+      [97.1, -32.4],
+      [102.4, -40.9],
+      [107.3, -49.6],
+      [110.7, -59.0],
+      [108.1, -68.1],
+      [98.8, -71.5],
+      [88.8, -72.4],
+      [78.8, -72.2],
+      [68.9, -70.6],
+      [59.5, -67.2],
+      [51.2, -61.6],
+      [44.7, -54.1],
+      [39.9, -45.3],
+      [35.2, -36.4],
+      [30.7, -27.5],
+      [26.2, -18.5],
+      [21.7, -9.6],
+      [17.4, -0.6],
+      [13.1, 8.5],
+      [8.9, 17.6],
+      [4.9, 26.8],
+      [1.1, 36.0],
+      [-2.5, 45.4],
+      [-5.7, 54.9],
+      [-7.9, 64.7],
+      [-7.7, 74.6],
+      [-5.6, 84.4],
+      [-2.9, 94.1],
+      [-2.1, 104.0],
+      [-7.3, 112.3],
+      [-15.7, 117.7],
+      [-24.8, 122.0],
+      [-34.2, 125.4],
+      [-43.9, 128.0],
+      [-53.7, 129.8],
+      [-63.7, 131.1],
+      [-73.6, 131.8],
+      [-83.7, 132.2],
+      [-93.7, 132.1],
+      [-103.7, 131.2],
+      [-113.5, 129.4],
+      [-122.8, 125.7],
+      [-129.7, 118.7],
+      [-131.8, 108.9],
+      [-132.7, 99.0],
+      [-133.4, 89.0],
+      [-134.0, 79.0],
+      [-134.5, 69.0],
+      [-134.9, 59.0],
+      [-135.2, 49.0],
+      [-135.5, 38.9],
+      [-135.8, 28.9],
+      [-136.0, 18.9],
     ],
-    width: 8,
+    width: 10.8,
     edgeLines: true,
+    // En esta pista el terreno va casi liso por defecto (ver applyTrack).
+    defaultRoughness: 0.1,
   },
   interlagos: {
     id: 'interlagos',
@@ -194,8 +382,12 @@ const lineMat = new THREE.MeshStandardMaterial({
   metalness: 0,
   envMapIntensity: 0.4,
   polygonOffset: true,
-  polygonOffsetFactor: -3,
-  polygonOffsetUnits: -3,
+  // La pintura debe ganar SIEMPRE a la calzada: a 8–15 mm de separación y
+  // con el far plane a 1200 m, a lo lejos la precisión del depth buffer
+  // (~6 mm a 100 m) hacía que el asfalto (bias −4, mayor que el −3 de la
+  // pintura) tapara las líneas hasta acercarse. Con −8 la pintura manda.
+  polygonOffsetFactor: -8,
+  polygonOffsetUnits: -8,
 });
 const curbMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
 const coneMat = new THREE.MeshStandardMaterial({ color: 0xe8641c, roughness: 0.7, metalness: 0 });
@@ -205,8 +397,8 @@ const coneMat = new THREE.MeshStandardMaterial({ color: 0xe8641c, roughness: 0.7
  * calzada) sino el esculpido del terreno bajo el corredor (`makeTrackCarve`).
  */
 const ROAD_LIFT = 0;
-/** La pintura (líneas y meta) vuela un poco sobre el asfalto. */
-const PAINT_LIFT = 0.008;
+/** La pintura (líneas y meta) vuela sobre el asfalto (ver bias en `lineMat`). */
+const PAINT_LIFT = 0.015;
 const CURB_RED = new THREE.Color(0xc23b2e);
 const CURB_WHITE = new THREE.Color(0xe8e6e2);
 

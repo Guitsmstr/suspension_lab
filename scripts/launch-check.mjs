@@ -270,7 +270,7 @@ const scenery = await page.evaluate(() => {
 });
 check('decoración instanciada', scenery.instances > 400, `${scenery.instances} piezas en ${scenery.drawCalls} draw calls`);
 check('obstáculos sólidos publicados', scenery.obstacles > 40, `${scenery.obstacles} colisionadores`);
-check('puntos de referencia alrededor del coche', scenery.near > 30, `${scenery.near} piezas en un radio de 45 m`);
+// La densidad junto al coche se verifica por salida en 5e (cada circuito).
 
 // --- 5e. circuitos: T rota por los 4 trazados (cada uno con su ruta) ---
 const seenTracks = [];
@@ -280,14 +280,21 @@ for (let i = 0; i < 4; i++) {
   seenTracks.push(await page.evaluate(() => ({
     mode: window.__sim.trackId(),
     badge: document.getElementById('track-badge')?.textContent ?? '?',
+    near: window.__sim.scenery.countNear(
+      window.__sim.vehicle.position.x, window.__sim.vehicle.position.z, 45),
   })));
 }
 const seenIds = seenTracks.map((t) => t.mode).join(',');
 check('T rota por los 4 circuitos', seenIds === 'interlagos,baja,stadium,monaco', seenIds);
 check('cada circuito trae su insignia',
   seenTracks[0].badge.includes('Interlagos') && seenTracks[1].badge.includes('Baja') &&
-  seenTracks[2].badge.includes('Estadio') && seenTracks[3].badge.includes('Mónaco'),
+  seenTracks[2].badge.includes('Estadio') && seenTracks[3].badge.includes('Barranquilla'),
   seenTracks.map((t) => t.badge).join(' | '));
+// Ninguna salida en un vacío: la de Barranquilla (recta oeste, junto al
+// borde) es la más rala por diseño; el mínimo lo marca ella.
+const minNear = Math.min(...seenTracks.map((t) => t.near));
+check('puntos de referencia en cada salida', minNear > 8,
+  seenTracks.map((t) => `${t.mode}=${t.near}`).join(' '));
 
 // --- 5g. garaje: V rota deportivo / todoterreno / kwid ---
 // Se espera al cambio real de coche en vez de dormir un fijo: el cambio
@@ -394,7 +401,7 @@ await page.waitForTimeout(300);
 const menuClosed = await page.evaluate(() =>
   document.getElementById('menu')?.classList.contains('hidden') ?? false);
 check('M cierra el menú', menuClosed);
-// Se deja el Tesla en Mónaco para el resto de comprobaciones
+// Se deja el Tesla en Barranquilla para el resto de comprobaciones
 await page.keyboard.press('v');
 await page.waitForTimeout(300);
 await page.keyboard.press('t');

@@ -202,12 +202,59 @@ function wheelNodeBox(node: THREE.Object3D, rot: THREE.Matrix4): THREE.Box3 | nu
  * del juego, las escala y las centra en el buje. Cada pieza se centra en
  * su propia caja: rin y neumático quedan concéntricos aunque el modelo
  * traiga desfases entre ellos.
+ *
+ * Opciones:
+ * - `flipY`: gira 180° sobre Y (frame del juego): pone la cara vista del
+ *   rin hacia fuera. Los `Hub_*` llegan con las aspas hacia −X/+X invertido
+ *   (hacia el interior); sin giro quedan mirando al coche.
+ * - `radialScale`: escala el plano radial (Y/Z, eje X) del rin para
+ *   agrandarlo sin ensancharlo.
+ * - `bead`: comprime el flanco del neumático hacia la banda (`r' = newR +
+ *   (r − oldR) · k`, en el plano radial Y/Z): la banda exterior no se mueve
+ *   y el talón sube a `newR`. Hay que recalcular normales tras escalas no
+ *   uniformes.
  */
-function dressWheelPart(node: THREE.Object3D, rot: THREE.Matrix4, s: number): THREE.Group | null {
+function dressWheelPart(
+  node: THREE.Object3D,
+  rot: THREE.Matrix4,
+  s: number,
+  opts: {
+    flipY?: boolean;
+    radialScale?: number;
+    bead?: { oldR: number; newR: number; k: number };
+  } = {},
+): THREE.Group | null {
   const parts = collectWheelMeshes(node).map((m) => {
     const geo = (m.geometry as THREE.BufferGeometry).clone();
     geo.applyMatrix4(rot);
+    if (opts.flipY) geo.rotateY(Math.PI);
     geo.scale(s, s, s);
+    if (opts.radialScale !== undefined || opts.bead) {
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      const k = opts.radialScale;
+      const bead = opts.bead;
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i);
+        let z = pos.getZ(i);
+        if (k !== undefined) {
+          y *= k;
+          z *= k;
+        }
+        if (bead) {
+          const r = Math.hypot(y, z);
+          if (r > 1e-6) {
+            const rn = bead.newR + (r - bead.oldR) * bead.k;
+            const f = rn / r;
+            y *= f;
+            z *= f;
+          }
+        }
+        pos.setY(i, y);
+        pos.setZ(i, z);
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    }
     geo.computeBoundingBox();
     return { geo, mat: m.material };
   });
@@ -226,6 +273,30 @@ function dressWheelPart(node: THREE.Object3D, rot: THREE.Matrix4, s: number): TH
   return group;
 }
 
+/** Rango radial (plano Y/Z del frame del juego, eje X) de un nodo ya rotado. */
+function wheelRadialRange(node: THREE.Object3D, rot: THREE.Matrix4): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = 0;
+  let found = false;
+  for (const m of collectWheelMeshes(node)) {
+    const geo = (m.geometry as THREE.BufferGeometry).clone();
+    geo.applyMatrix4(rot);
+    const pos = geo.attributes.position as THREE.BufferAttribute | undefined;
+    if (!pos) {
+      geo.dispose();
+      continue;
+    }
+    for (let i = 0; i < pos.count; i++) {
+      const r = Math.hypot(pos.getY(i), pos.getZ(i));
+      if (r < min) min = r;
+      if (r > max) max = r;
+    }
+    geo.dispose();
+    found = true;
+  }
+  return found ? { min, max } : null;
+}
+
 /**
  * Cáscara Tripo sin sus ruedas + ruedas (`kwid_wheels.glb`, generadas por
  * `scripts/kwid_wheels_export.py`: `Wheel_FL…` + `Hub_FL…`).
@@ -234,6 +305,11 @@ function dressWheelPart(node: THREE.Object3D, rot: THREE.Matrix4, s: number): TH
  * (X=ancho, Y=arriba, Z=largo), se escala al diámetro físico y se centra
  * en el buje (dirección sin excentricidad). La carrocería se desplaza en
  * Z para que los pasos caigan sobre los bujes.
+ *
+ * Rines: se giran 180° sobre Y para que las aspas miren hacia fuera y se
+ * agrandan en el plano radial hasta el talón nuevo. Neumáticos: perfil
+ * bajo (flanco al 50 %): el talón sube y la banda exterior no se mueve,
+ * así que el diámetro físico (`wheelRadius`) no cambia.
  */
 export async function loadKwidShell(wheelRadius: number): Promise<{
   body: THREE.Group;
@@ -265,6 +341,8 @@ export async function loadKwidShell(wheelRadius: number): Promise<{
 
   const wheels: KwidWheelPart[] = [];
   const rot = new THREE.Matrix4().makeRotationY(-Math.PI / 2);
+  /** Flanco al 50 %: cuánto se comprime el perfil hacia la banda. */
+  const PROFILE_KEEP = 0.5;
   for (const suffix of ['FL', 'FR', 'RL', 'RR']) {
     const tireNode = wheelsRoot.getObjectByName(`Wheel_${suffix}`);
     if (!tireNode) return null;
@@ -274,9 +352,23 @@ export async function loadKwidShell(wheelRadius: number): Promise<{
     if (!tireBox) return null;
     const size = tireBox.getSize(new THREE.Vector3());
     const s = (wheelRadius * 2) / Math.max(size.y, size.z);
-    const tire = dressWheelPart(tireNode, rot, s);
+    // Talón nuevo a mitad de flanco (medido en el modelo para que valga
+    // ante cualquier reexport del .blend): banda fija, flanco al 50 %.
+    const tireRad = wheelRadialRange(tireNode, rot);
     const rimNode = wheelsRoot.getObjectByName(`Hub_${suffix}`);
-    const rim = rimNode ? dressWheelPart(rimNode, rot, s) : null;
+    const rimRad = rimNode ? wheelRadialRange(rimNode, rot) : null;
+    const outer = tireRad ? tireRad.max * s : wheelRadius;
+    const beadOld = tireRad ? tireRad.min * s : wheelRadius * 0.55;
+    const beadNew = outer - (outer - beadOld) * PROFILE_KEEP;
+    const tire = dressWheelPart(tireNode, rot, s, {
+      bead: { oldR: beadOld, newR: beadNew, k: PROFILE_KEEP },
+    });
+    // El rin crece en el plano radial hasta el talón nuevo (sin ensanchar)
+    // y se gira para que las aspas miren hacia fuera.
+    const rimK = rimRad && rimRad.max > 1e-6 ? beadNew / (rimRad.max * s) : null;
+    const rim = rimNode
+      ? dressWheelPart(rimNode, rot, s, { flipY: true, ...(rimK ? { radialScale: rimK } : {}) })
+      : null;
     if (!tire) return null;
     wheels.push({ name: `Wheel_${suffix}`, tire, rim });
   }

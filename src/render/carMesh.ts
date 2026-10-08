@@ -319,10 +319,19 @@ export class CarVisual {
       corner.dressing.visible = false;
       corner.caliper.visible = false;
       this.addContour(w.tire);
-      corner.spin.attach(w.tire);
+      // Las piezas ya vienen centradas en el buje (`dressWheelPart`): van
+      // al origen del `spin` con `add`, no con `attach`. `attach` conserva
+      // el mundo (origen del coche) y dejaría la rueda colgando a ~1 m del
+      // buje: al girar dibuja un círculo grande alrededor del eje en vez
+      // de girar sobre su centro.
+      w.tire.position.set(0, 0, 0);
+      w.tire.quaternion.identity();
+      corner.spin.add(w.tire);
       if (w.rim) {
         this.addContour(w.rim);
-        corner.spin.attach(w.rim);
+        w.rim.position.set(0, 0, 0);
+        w.rim.quaternion.identity();
+        corner.spin.add(w.rim);
       }
       // Disco de freno oscuro tras los radios: da contraste (si no, por
       // los huecos se ve el paso pálido y el rin parece macizo). Va al

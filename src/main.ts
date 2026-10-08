@@ -220,6 +220,12 @@ async function boot(): Promise<void> {
       trackId = id;
       for (const [mode, handle] of tracks) handle.group.visible = mode === trackId;
       const def = TRACKS[trackId];
+      // La Barranquilla va casi lisa por defecto; el usuario puede retocarla
+      // con el slider después (el valor por circuito solo se aplica al entrar).
+      if (def.defaultRoughness !== undefined) {
+        params.set('roughness', def.defaultRoughness);
+        panel.syncFromStore();
+      }
       if (trackBadge) trackBadge.textContent = def.badge;
       panel.setTrackLabel(def.name);
       race.setTrack(def);
@@ -285,7 +291,7 @@ async function boot(): Promise<void> {
     applyTrack(trackId, false);
     applyCar(carId);
     {
-      // applyCar reaparece el coche; se deja sobre la salida de Mónaco
+      // applyCar reaparece el coche; se deja sobre la salida de Barranquilla
       const s = trackSpawn(TRACKS[trackId]);
       vehicle.setSpawn(s.x, s.z, s.yaw);
     }
