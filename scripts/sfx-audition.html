@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Suspension Lab — audición de SFX</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 14px/1.5 system-ui, sans-serif; background: #14171c; color: #e6e9ee; margin: 0; padding: 28px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: #98a2b0; margin: 0 0 24px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: #8fa3b8; margin: 28px 0 10px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 8px; }
+  .row:hover { background: #1d232b; }
+  .name { width: 220px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .desc { flex: 1; color: #98a2b0; font-size: 12px; }
+  button { background: #2b6cb0; color: #fff; border: 0; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+  button.loop { background: #2f855a; }
+  button:active { transform: translateY(1px); }
+  input[type=range] { width: 110px; }
+  label { font-size: 11px; color: #98a2b0; }
+</style>
+</head>
+<body>
+  <h1>Audición de SFX — Suspension Lab</h1>
+  <p class="sub">Generado por <code>scripts/gen-sounds.mjs</code>. En los bucles, el control "rate" simula el escalado por rpm/velocidad que hará el juego.</p>
+  <div id="app"></div>
+  <script src="../public/sfx/manifest.js"></script>
+  <script>
+    const GROUPS = [
+      ['motor', 'Motor (bucles escalables por rpm · f0 = 100 Hz)'],
+      ['rodadura', 'Rodadura por superficie (escalar volumen con velocidad)'],
+      ['neumático', 'Neumáticos (escalar con slip / frenado)'],
+      ['suspensión', 'Suspensión y chasis'],
+      ['chasis', 'Raspado de bajos'],
+      ['impacto', 'Impactos'],
+      ['ambiente', 'Ambiente'],
+      ['ui', 'UI y carrera'],
+    ];
+    const manifest = window.SFX_MANIFEST;
+    const app = document.getElementById('app');
+    for (const [group, title] of GROUPS) {
+      const items = manifest.filter(m => m.group === group);
+      if (!items.length) continue;
+      const h = document.createElement('h2');
+      h.textContent = title;
+      app.appendChild(h);
+      for (const m of items) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        const isLoop = m.kind === 'loop';
+        row.innerHTML = `
+          <button class="${isLoop ? 'loop' : ''}">▶ play</button>
+          <span class="name">${m.name}</span>
+          ${isLoop ? `<label>rate <input type="range" min="0.4" max="3" step="0.01" value="1"></label>` : ''}
+          <span class="desc">${m.desc}</span>`;
+        const audio = new Audio(`../public/sfx/${m.name}`);
+        audio.loop = isLoop;
+        audio.volume = Math.min(1, (m.gain ?? 0.7) * 1.1);
+        const btn = row.querySelector('button');
+        const rate = row.querySelector('input');
+        if (rate) rate.addEventListener('input', () => { audio.playbackRate = parseFloat(rate.value); });
+        btn.addEventListener('click', () => {
+          if (isLoop && !audio.paused) { audio.pause(); btn.textContent = '▶ play'; return; }
+          if (!isLoop) audio.currentTime = 0;
+          audio.play();
+          btn.textContent = isLoop ? '■ stop' : '▶ play';
+          if (!isLoop) audio.onended = () => { btn.textContent = '▶ play'; };
+        });
+        app.appendChild(row);
+      }
+    }
+  </script>
+</body>
+</html>
