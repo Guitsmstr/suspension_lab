@@ -242,7 +242,7 @@ a fondo quema goma en 1ª/2ª como cualquier propulsión real.
 Curva de par motor realista, caja automática de 6 marchas con puntos de cambio, **corte de par al cambiar** (0,15 s casi sin par, como una caja real), **freno motor** (arrastre ≈18 N·m por cada 1000 rpm, repartido a las ruedas motrices), diferencial con bloqueo limitado por eje y reparto de par configurable entre ejes (de tracción trasera a delantera). Con el coche parado, mantener el freno (`S`) engrana la **marcha atrás** (desmultiplicación fija ≈ 1ª, par negativo, tope ~30 km/h, `R` en el HUD y en la telemetría como marcha 0); el acelerador (`W`) desengrana y vuelve a 1ª.
 
 ### Dirección
-Geometría Ackermann real en el eje delantero, con **tope dependiente de la velocidad**: el ángulo del slider es el de parking (a <6 m/s); por encima se recorta al ángulo que demanda como máximo ~1,6 g laterales (modelo bicicleta). A 108 km/h el Tesla gira ~3° a tope de tecla: suficiente para jugar al límite del neumático sin pedir los ~9 g absurdos del tope de parking. En derrape, corrigiendo (volante y deslizamiento del mismo signo), el tope se amplía hasta la deriva + 4°: es el ángulo necesario para alinear las ruedas con la velocidad y recuperar; sin esa ampliación los derrapes grandes serían irrecuperables con el recorte.
+Geometría Ackermann real en el eje delantero, con **asistencia dependiente de la velocidad y del agarre** (no es física emergente: equivale al *speed sensitivity* de Assetto Corsa/rFactor o a una dirección activa real). El ángulo del slider es el de parking (a <6 m/s); por encima se recorta al ángulo que demanda como máximo ~1,6 g laterales en asfalto (modelo bicicleta), adaptado al μ estimado con margen ×2 para que los derrapes sigan saliendo: en hierba el tope cae a ~0,9 g en vez de pedir 4× el agarre disponible. A 108 km/h el Tesla gira ~3° a tope de tecla: suficiente para jugar al límite del neumático sin pedir los ~9 g absurdos del tope de parking. En derrape, corrigiendo (volante y deslizamiento del mismo signo), el tope se amplía hasta la deriva + 4°: es el ángulo necesario para alinear las ruedas con la velocidad y recuperar; sin esa ampliación los derrapes grandes serían irrecuperables con el recorte. Con **SHIFT** (modo prueba) el tope se libera un 25 % hasta la cremallera: es la única ayuda que se relaja; si el Kwid vuelca buscándolo, vuelca (la física no lo impide).
 
 ### Balance: subviraje y sobreviraje
 En apoyo a media carga los tres coches van de morro (deslizamiento delantero
@@ -255,7 +255,7 @@ en el 4x4 alto). Todo progresivo, sin tijeretazos: el deslizamiento crece de
 forma continua y da ~1 s para corregirlo.
 
 ### Fuerzas adicionales
-Aerodinámica (arrastre + downforce), resistencia a la rodadura y reparto de frenada con sesgo delantero.
+Aerodinámica por coche (Cd·A y apoyo: el Tesla es mucho más fino y genera más apoyo que el Kwid alto), resistencia a la rodadura y reparto de frenada con sesgo delantero.
 
 ### Contacto con el terreno y obstáculos
 La rueda muestrea la altura del terreno bajo su eje, pero la carrocería también es sólida: diez puntos bajo el chasis (deflector, estribos, difusor y esquinas) generan una fuerza elástico-viscosa con rozamiento al raspar el suelo. Junto a ella hay una corrección geométrica de penetración, de modo que el coche **nunca se hunde** en badenes, pendientes ni aterrizajes: sin este contacto la carrocería atravesaba el terreno hasta 40 cm.

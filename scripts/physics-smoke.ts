@@ -56,6 +56,7 @@ interface Input {
   brake: number;
   steer: number;
   handbrake: boolean;
+  testMode?: boolean;
 }
 
 let failures = 0;
@@ -1023,10 +1024,20 @@ scenario('La dirección se recorta con la velocidad', (p, _t, v) => {
   run(v, 0.5, { ...NO_INPUT, steer: 1 });
   const fastSteer = Math.max(...v.cornerStates.map((s) => Math.abs(s.steer))) * 180 / Math.PI;
 
+  // Modo prueba (Shift): 25 % más de volante a alta velocidad, sin pasar del
+  // tope de cremallera.
+  v.setSpawn(0, 0, 0);
+  v.velocity.set(0, 0, 30);
+  run(v, 0.5, { ...NO_INPUT, steer: 1, testMode: true });
+  const boostSteer = Math.max(...v.cornerStates.map((s) => Math.abs(s.steer))) * 180 / Math.PI;
+
   check('valores finitos', isFiniteVehicle(v));
   check('en parado/casi parado hay tope completo', slowSteer > lockDeg - 2, `${slowSteer.toFixed(1)}°`);
   check('a 108 km/h se recorta (<12°)', fastSteer < 12, `${fastSteer.toFixed(1)}°`);
   check('a 108 km/h sigue habiendo dirección', fastSteer > 1, `${fastSteer.toFixed(1)}°`);
+  check('Shift da un 25 % más de volante', boostSteer > fastSteer * 1.2 && boostSteer < fastSteer * 1.3,
+    `${fastSteer.toFixed(1)}° → ${boostSteer.toFixed(1)}°`);
+  check('ni con Shift se pasa del tope', boostSteer <= lockDeg + 1e-6, `${boostSteer.toFixed(1)}°`);
 });
 
 scenario('El camber empuja pero no tira en recta', () => {

@@ -7,6 +7,8 @@ export interface InputState {
   brake: number; // 0..1
   steer: number; // -1 (izq) .. +1 (der)
   handbrake: boolean;
+  /** Modo prueba (Shift): libera un 25 % más de dirección (ver `Vehicle.step`). */
+  testMode: boolean;
 }
 
 const STEER_RATE = 3.2; // unidades/s hacia el objetivo
@@ -18,6 +20,7 @@ export class Input {
     brake: 0,
     steer: 0,
     handbrake: false,
+    testMode: false,
   };
 
   private keys = new Set<string>();
@@ -49,6 +52,7 @@ export class Input {
     s.throttle = this.down('KeyW', 'ArrowUp') ? 1 : 0;
     s.brake = this.down('KeyS', 'ArrowDown') ? 1 : 0;
     s.handbrake = this.down('Space');
+    s.testMode = this.down('ShiftLeft', 'ShiftRight');
 
     const left = this.down('KeyA', 'ArrowLeft');
     const right = this.down('KeyD', 'ArrowRight');

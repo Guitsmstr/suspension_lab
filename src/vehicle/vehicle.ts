@@ -79,8 +79,9 @@ export const FRONT_AXLE_Z = WHEELBASE * (1 - FRONT_LOAD_SHARE); // +1.32
 export const REAR_AXLE_Z = -WHEELBASE * FRONT_LOAD_SHARE; // -1.43
 const GRAVITY = 9.81;
 const AIR_DENSITY = 1.225;
-const DRAG_AREA = 0.72; // Cd·A [m²]
-const LIFT_AREA = 0.55; // Cl·A [m²]
+/** Respaldo aerodinámico hasta que `setCar` publica el del coche activo. */
+const DEFAULT_DRAG_AREA = 0.72; // Cd·A [m²]
+const DEFAULT_LIFT_AREA = 0.55; // Cl·A [m²] como apoyo hacia abajo
 const ROLLING_RESISTANCE = 0.014;
 /** Por debajo de esta velocidad del punto de contacto la goma no patina:
  * la rueda queda ligada a la rodadura (fricción estática) [m/s]. */
@@ -100,10 +101,16 @@ const MAX_BRAKE_TORQUE = 6400; // N·m totales
 const MAX_REVERSE_SPEED = 8.5;
 const HANDBRAKE_TORQUE = 4200; // N·m en el eje trasero
 /**
- * Demanda lateral máxima que permite la dirección [g]: por encima de cierta
- * velocidad el tope de giro se recorta para no pedir más que esto. Un turismo
- * real a 70 km/h no admite ni de lejos el tope de parking (pediría ~9 g);
- * 1,6 g deja jugar al límite del neumático (~1 g) sin demandas absurdas.
+ * Tope absoluto de demanda lateral que permite la asistencia de dirección [g].
+ * NO es física: es la ayuda al conductor de teclado (equivalente al
+ * "speed sensitivity" de Assetto Corsa / rFactor o a la desmultiplicación
+ * variable de una dirección activa real). Un coche real admite el tope de
+ * cremallera a cualquier velocidad y desliza si supera el agarre; aquí se
+ * recorta al ángulo que demanda como máximo este G (modelo bicicleta:
+ * δ = atan(a·L/v²)) para no pedir ~9 g en parking a 70 km/h. El tope
+ * efectivo además se adapta al agarre estimado (ver `step`): en hierba cae
+ * a ~0,9 g en vez de quedarse en 1,6 g. 1,6 g deja jugar al límite del
+ * neumático (~1 g) sin demandas absurdas.
  */
 const MAX_STEER_LAT_G = 1.6;
 /** Por debajo de esta velocidad la dirección conserva todo el tope [m/s]. */
@@ -312,6 +319,9 @@ export class Vehicle {
   sprungMass = SPRUNG_MASS;
   sprungMassFront = SPRUNG_MASS_FRONT;
   sprungMassRear = SPRUNG_MASS_REAR;
+  /** Aerodinámica del coche activo (ver `CarSpec.dragArea/liftArea`). */
+  dragArea = DEFAULT_DRAG_AREA;
+  liftArea = DEFAULT_LIFT_AREA;
   /** Altura del ojo del conductor para la cámara del capó. */
   hoodY = 1.18;
 
@@ -389,6 +399,8 @@ export class Vehicle {
     this.sprungMassFront = (this.sprungMass * spec.frontShare) / 2;
     this.sprungMassRear = (this.sprungMass * (1 - spec.frontShare)) / 2;
     this.inertia.set(spec.inertia[0], spec.inertia[1], spec.inertia[2]);
+    this.dragArea = spec.dragArea;
+    this.liftArea = spec.liftArea;
     this.chassisContacts = chassisVectors(spec);
     this.hoodY = spec.hoodY;
 
@@ -562,7 +574,10 @@ export class Vehicle {
   }
 
   /** Avanza la simulación un paso fijo dt (segundos). */
-  step(dt: number, input: { throttle: number; brake: number; steer: number; handbrake: boolean }): void {
+  step(
+    dt: number,
+    input: { throttle: number; brake: number; steer: number; handbrake: boolean; testMode?: boolean },
+  ): void {
     const P = this.params.values;
     const q = this.quaternion;
 
@@ -577,12 +592,25 @@ export class Vehicle {
     this.forceApp.set(0, 0, 0);
 
     // ---------------- Dirección ----------------
-    // Tope de giro dependiente de la velocidad: el ángulo que a 5 m/s aparca,
-    // a 30 m/s pediría varios g laterales. Se recorta al ángulo que demanda
-    // como máximo MAX_STEER_LAT_G (modelo bicicleta: δ = atan(a·L/v²)).
+    // Tope de giro dependiente de la velocidad Y del agarre (asistencia al
+    // conductor, no física: ver `MAX_STEER_LAT_G`). El ángulo que a 5 m/s
+    // aparca, a 30 m/s pediría varios g laterales. Se recorta al ángulo que
+    // demanda como máximo el tope de G efectivo (modelo bicicleta:
+    // δ = atan(a·L/v²)). Ese tope es el mínimo entre el absoluto (1,6 g) y
+    // el agarre estimado (μ medio de las 4 ruedas del paso anterior, con
+    // margen generoso ×2 y suelo de 0,9 g para que provocar y corregir un
+    // derrape siga siendo posible, como haría un conductor real). En hierba
+    // (μ≈0,4) el tope cae a ~0,9 g: no se piden 4× el agarre disponible.
     const lockRad = ((P.steerLock * Math.PI) / 180) * input.steer;
     const vSteer = Math.max(this.velocity.length(), STEER_FULL_LOCK_SPEED);
-    const maxByG = Math.atan((MAX_STEER_LAT_G * GRAVITY * this.wheelbase) / (vSteer * vSteer));
+    const muEst =
+      0.25 *
+      (this.cornerTireCfg[0].mu +
+        this.cornerTireCfg[1].mu +
+        this.cornerTireCfg[2].mu +
+        this.cornerTireCfg[3].mu);
+    const gCap = Math.min(MAX_STEER_LAT_G, Math.max(0.9, muEst * 2));
+    const maxByG = Math.atan((gCap * GRAVITY * this.wheelbase) / (vSteer * vSteer));
     // Deslizamiento con signo: σ = atan2(v·R̂, v·F̂), R̂ = −X del cuerpo (la
     // derecha del coche). En apoyo normal el morro apunta más adentro que la
     // velocidad (σ de signo contrario al volante); si coinciden, el conductor
@@ -602,9 +630,14 @@ export class Vehicle {
       lockRad !== 0 &&
       Math.sign(lockRad) === Math.sign(sigma);
     const rescue = Math.abs(sigma) + (4 * Math.PI) / 180;
-    const steerMax = correcting
+    const rawMax = correcting
       ? Math.min(Math.abs(lockRad), Math.max(maxByG, rescue))
       : Math.min(Math.abs(lockRad), maxByG);
+    // Modo prueba (Shift): libera un 25 % más de dirección, hasta el tope de
+    // cremallera. Es la única limitación impuesta que se relaja: el resto
+    // (saturación del neumático, transferencia de carga, vuelco) es física
+    // emergente y responde igual; si el Kwid vuelca en modo prueba, vuelca.
+    const steerMax = Math.min(Math.abs(lockRad), rawMax * (input.testMode === true ? 1.25 : 1));
     const steerInput = Math.sign(lockRad) * steerMax;
 
     // ---------------- Tren motriz ----------------
@@ -939,12 +972,12 @@ export class Vehicle {
       }
     }
 
-    // ---------------- Aerodinámica ----------------
+    // ---------------- Aerodinámica (por coche: ver `CarSpec`) ----------------
     const speed = this.velocity.length();
     if (speed > 0.05) {
       const qDyn = 0.5 * AIR_DENSITY * speed * speed;
-      this.dragVec.copy(this.velocity).normalize().multiplyScalar(-qDyn * DRAG_AREA);
-      this.downVec.copy(this.upWorld).multiplyScalar(-qDyn * LIFT_AREA);
+      this.dragVec.copy(this.velocity).normalize().multiplyScalar(-qDyn * this.dragArea);
+      this.downVec.copy(this.upWorld).multiplyScalar(-qDyn * this.liftArea);
       this.forceAccum.add(this.dragVec).add(this.downVec);
       this.forceApp.add(this.dragVec).add(this.downVec);
     }

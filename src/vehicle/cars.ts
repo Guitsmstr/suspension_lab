@@ -9,7 +9,9 @@
  * - `kwid`: Renault Kwid 1.0 (datos: ~775 kg + conductor ≈ 820 kg, 50 kW/68 CV,
  *   batalla 2,422 m, vía 1,41 m — estrechada a 1,23 m por los pasos del
  *   modelo Tripo (ruedas a ±0,615) —, ruedas 165/70 R13, CdM alto de
- *   crossover económico).
+ *   crossover económico (0,62 m frente a los 0,50 m del sedán con batería
+ *   en el piso), suspensiones blandas y estabilizadora trasera casi
+ *   testimonial: en curva tumba visiblemente más que el Tesla).
  */
 import * as THREE from 'three';
 
@@ -36,6 +38,10 @@ export interface CarSpec {
   wheelInertiaRear: number;
   /** Inercia del chasis [Ixx cabeceo, Iyy guiñada, Izz alabeo]. */
   inertia: [number, number, number];
+  /** Resistencia aerodinámica Cd·A [m²] (el sedán es mucho más fino que el crossover alto). */
+  dragArea: number;
+  /** Apoyo aerodinámico Cl·A [m²] como fuerza hacia abajo (fondo plano vs carrocería alta). */
+  liftArea: number;
   /** Puntos bajos de la carrocería en el frame del cuerpo (anti-hundimiento). */
   chassisContacts: Array<[number, number, number]>;
   /** Altura del ojo del conductor para la cámara del capó [m, frame cuerpo]. */
@@ -108,6 +114,8 @@ export const CARS: Record<CarId, CarSpec> = {
     wheelInertiaFront: 1.6,
     wheelInertiaRear: 1.7,
     inertia: [2800, 3400, 800],
+    dragArea: 0.52, // Cd 0,219 × ~2,35 m² frontales
+    liftArea: 0.55, // fondo plano + difusor: apoyo estable a velocidad
     chassisContacts: SPORT_CONTACTS,
     hoodY: 1.05,
     preset: {
@@ -147,6 +155,8 @@ export const CARS: Record<CarId, CarSpec> = {
     wheelInertiaFront: 2.4,
     wheelInertiaRear: 2.6,
     inertia: [2900, 3500, 850],
+    dragArea: 0.95, // pick-up alta de rally-raid: un ladrillo
+    liftArea: 0.4,
     chassisContacts: OFFROAD_CONTACTS,
     hoodY: 1.45,
     preset: {
@@ -176,7 +186,7 @@ export const CARS: Record<CarId, CarSpec> = {
     badge: '🚗 Kwid · delantera',
     blurb: 'Crossover urbano de tracción delantera. Ligero y ágil.',
     mass: 820,
-    comHeight: 0.55,
+    comHeight: 0.62, // crossover alto y estrecho (1,48 m, 180 mm de despeje): CdM claramente por encima del sedán
     wheelbase: 2.42,
     track: 1.23, // vía estrechada a los pasos del Tripo (±0.615)
     wheelRadius: 0.31,
@@ -186,18 +196,20 @@ export const CARS: Record<CarId, CarSpec> = {
     wheelInertiaFront: 0.7,
     wheelInertiaRear: 0.65,
     inertia: [1300, 1600, 400],
+    dragArea: 0.72, // carrocería alta y estrecha
+    liftArea: 0.35, // sin fondo plano: a velocidad sustenta menos que el sedán
     chassisContacts: KWID_CONTACTS,
     hoodY: 1.22,
     preset: {
-      fSpring: 24,
+      fSpring: 20, // McPherson blando de utilitario: permite balanceo visible
       fBump: 2600,
       fRebound: 4000,
-      fArb: 24,
+      fArb: 14, // estabilizadora modesta delante…
       fPreload: 0,
-      rSpring: 20,
+      rSpring: 17,
       rBump: 2500,
       rRebound: 3900,
-      rArb: 18,
+      rArb: 8, // …casi testimonial detrás (barra de torsión): el Kwid tumba
       rPreload: 0,
       tireMu: 0.92,
       tireVertStiff: 200,
