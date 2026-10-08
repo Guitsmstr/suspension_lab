@@ -20,6 +20,7 @@ export interface PanelActions {
   onCar: () => void;
   onMenu: () => void;
   onCollapse: () => void;
+  onSound: () => void;
 }
 
 function fmt(v: number, digits = 1): string {
@@ -85,6 +86,7 @@ export class Panel {
     document.getElementById('btn-car')?.addEventListener('click', actions.onCar);
     document.getElementById('btn-menu')?.addEventListener('click', actions.onMenu);
     document.getElementById('btn-collapse')?.addEventListener('click', actions.onCollapse);
+    document.getElementById('btn-sound')?.addEventListener('click', actions.onSound);
 
     this.params.onChange(() => this.updateTuneSummary());
     this.updateTuneSummary();
@@ -229,6 +231,14 @@ export class Panel {
   setCameraLabel(label: string): void {
     const btn = document.getElementById('btn-camera');
     if (btn) btn.textContent = `Cámara: ${label} (C)`;
+  }
+
+  setSoundLabel(on: boolean): void {
+    const btn = document.getElementById('btn-sound');
+    if (btn) {
+      btn.textContent = on ? 'Sonido: ON (N)' : 'Sonido: OFF (N)';
+      btn.classList.toggle('active', !on);
+    }
   }
 
   setTrackLabel(label: string): void {

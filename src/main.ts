@@ -30,6 +30,7 @@ import { RaceDirector } from './world/race';
 import { Panel } from './ui/panel';
 import { Menu } from './ui/menu';
 import { Loader, installErrorReporter } from './ui/loader';
+import { GameAudio } from './audio/gameAudio';
 
 /** Paso de física fijo (s): suficientemente pequeño para la rigidez de los neumáticos. */
 const PHYSICS_DT = 1 / 300;
@@ -192,6 +193,16 @@ async function boot(): Promise<void> {
     const helpEl = document.getElementById('help');
     let paused = false;
 
+    // ---------------- Audio ----------------
+    // El audio solo lee estado (telemetría): la física no depende de él. La
+    // carga es asíncrona y degrada en silencio si algo falla.
+    const audio = new GameAudio();
+    void audio.load().catch(() => undefined);
+    const unlockAudio = (): void => audio.unlock();
+    window.addEventListener('keydown', unlockAudio, { once: true });
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    params.onChange(() => audio.click());
+
     const panel = new Panel(params, {
       onReset: () => {
         vehicle.reset();
@@ -214,6 +225,9 @@ async function boot(): Promise<void> {
         menu.refresh(carId, trackId, cameraRig.mode);
       },
       onCollapse: () => panel.toggleCollapsed(),
+      onSound: () => {
+        panel.setSoundLabel(!audio.toggleMuted());
+      },
     });
     panel.setCameraLabel(cameraRig.modeLabel);
     panel.syncFromStore();
@@ -256,6 +270,7 @@ async function boot(): Promise<void> {
         carId = id;
         const spec = CARS[carId];
         vehicle.setCar(id);
+        audio.setCar(id);
         params.applyPreset(spec.preset);
         panel.syncFromStore();
         panel.setSprungMasses(vehicle.sprungMassFront, vehicle.sprungMassRear);
@@ -366,6 +381,7 @@ async function boot(): Promise<void> {
     const startCountdown = (): void => {
       countdown.active = true;
       countdown.t = 0;
+      audio.countdownBeep(0);
       if (countdownEl) {
         countdownEl.hidden = false;
         countdownEl.textContent = COUNTDOWN_STEPS[0];
@@ -402,6 +418,7 @@ async function boot(): Promise<void> {
         if (input.consumePress('KeyT')) cycleTrack();
         if (input.consumePress('KeyV')) cycleCar();
         if (input.consumePress('KeyO')) panel.toggleCollapsed();
+        if (input.consumePress('KeyN')) panel.setSoundLabel(!audio.toggleMuted());
         if (input.consumePress('KeyM')) {
           menu.toggle();
           menu.refresh(carId, trackId, cameraRig.mode);
@@ -437,8 +454,12 @@ async function boot(): Promise<void> {
 
           if (countdown.active) {
             countdown.t += dt;
-            const shown = COUNTDOWN_STEPS[Math.min(COUNTDOWN_STEPS.length - 1, Math.floor(countdown.t))];
-            if (countdownEl && countdownEl.textContent !== shown) countdownEl.textContent = shown;
+            const step = Math.min(COUNTDOWN_STEPS.length - 1, Math.floor(countdown.t));
+            const shown = COUNTDOWN_STEPS[step];
+            if (countdownEl && countdownEl.textContent !== shown) {
+              countdownEl.textContent = shown;
+              audio.countdownBeep(step);
+            }
             if (countdown.t >= COUNTDOWN_END) {
               countdown.active = false;
               if (countdownEl) countdownEl.hidden = true;
@@ -455,6 +476,7 @@ async function boot(): Promise<void> {
         minimap.update(vehicle.position.x, vehicle.position.z, fwdMini.x, fwdMini.z);
         followSun(env, car.group.position);
         panel.update(vehicle.telemetry);
+        audio.update(dt, vehicle, { paused });
 
         renderer.render(scene, camera);
 
