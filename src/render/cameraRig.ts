@@ -24,6 +24,9 @@ export class CameraRig {
   private readonly tmp = new THREE.Vector3();
   private readonly targetDir = new THREE.Vector3();
   private readonly up = new THREE.Vector3(0, 1, 0);
+  /** Scratch para la pose interpolada del coche (sin asignaciones por frame). */
+  private readonly carPos = new THREE.Vector3();
+  private readonly carQuat = new THREE.Quaternion();
   /** Desplazamiento del coche entre fotogramas (avance para la persecución). */
   private readonly prevCar = new THREE.Vector3();
   private readonly frameDelta = new THREE.Vector3();
@@ -57,19 +60,21 @@ export class CameraRig {
     this.distance = Math.max(3, Math.min(30, distance));
   }
 
-  /** Coloca la cámara al final del frame. */
-  apply(camera: THREE.PerspectiveCamera, vehicle: Vehicle, dt: number): void {
-    const pos = vehicle.position;
-    const forward = this.tmp.copy(this.up).set(0, 0, 1).applyQuaternion(vehicle.quaternion);
+  /** Coloca la cámara al final del frame. `alpha` interpola la pose del coche. */
+  apply(camera: THREE.PerspectiveCamera, vehicle: Vehicle, dt: number, alpha = 1): void {
+    vehicle.renderPosition(alpha, this.carPos);
+    vehicle.renderQuaternion(alpha, this.carQuat);
+    const pos = this.carPos;
+    const forward = this.tmp.copy(this.up).set(0, 0, 1).applyQuaternion(this.carQuat);
     const speed = vehicle.velocity.length();
 
     if (this.mode === 'hood') {
       // POV de conductor con guías visuales: cámara un poco más atrás y
       // arriba que el ojo, mirando algo más abajo para encuadrar capó,
       // aletas y retrovisores además de la pista.
-      const camPos = new THREE.Vector3(0, vehicle.hoodY + 0.12, -0.55).applyQuaternion(vehicle.quaternion).add(pos);
+      const camPos = new THREE.Vector3(0, vehicle.hoodY + 0.12, -0.55).applyQuaternion(this.carQuat).add(pos);
       camera.position.copy(camPos);
-      const look = new THREE.Vector3(0, vehicle.hoodY - 0.42, 26).applyQuaternion(vehicle.quaternion).add(pos);
+      const look = new THREE.Vector3(0, vehicle.hoodY - 0.42, 26).applyQuaternion(this.carQuat).add(pos);
       camera.lookAt(look);
       return;
     }

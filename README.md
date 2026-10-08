@@ -38,6 +38,10 @@ comportamiento físico del modelo:
 - paso por badenes a 22 m/s (wheel hop de la masa no suspendida)
 - estabilidad con parámetros extremos (muelles al máximo, amortiguación mínima)
 - coherencia del visual con la física (ruedas y muelles siguen el recorrido)
+- el terreno esculpido nunca asoma por las calzadas (holgura y borde en
+  pendiente, rugosidad 0–2)
+- el render interpolado no tiembla con fotogramas irregulares a 90 km/h
+- sin ringing del giro de rueda al rodar con freno motor (0,5–6 m/s)
 
 `pnpm check:launch` arranca la app en un Chromium headless y valida el
 lanzamiento real: barra de progreso, ausencia de errores de consola, bucle de
@@ -85,8 +89,29 @@ lentas:
 | **🏜 Baja Whoops** | tierra | rápida oeste con la recta de badenes como tramo de saltos y cerrada al fondo | ~450 m · 6 m |
 | **🏜 Estadio Rallycross** | tierra | técnico centro-oeste: esses, horquilla alta y bajada sin respiro | ~290 m · 5,5 m |
 
-El asfalto lleva líneas de borde y **pianos rojo/blanco en las curvas**; la tierra,
-**conos naranjas** marcando la trazada. Las calzadas son cintas 3D ceñidas al terreno analítico (vuelan 3 cm sobre él: lo justo para que la malla nunca las tape sin enterrar visualmente las ruedas, ya que la física rueda sobre el terreno); si se cambia la rugosidad en vivo se reconstruyen la **malla del terreno**, las calzadas y las barreras (con rebote de 250 ms). Sin reconstruir el terreno, física y hierba discreparían y la pista quedaría enterrada. La decoración nunca nace sobre ninguna calzada.
+El asfalto lleva líneas de borde y **pianos rojo/blanco en las curvas** (3 losas de
+1 m por piano, cada una con su altura y caída); la tierra, **conos naranjas**
+marcando la trazada. La calzada y la hierba son dos interpolaciones distintas de
+la misma función de altura y **se cruzan**: sin más, la cuerda de la malla del
+terreno (paso 1 m) asomaba por la pista en valles y curvas. La solución es la de
+los juegos AAA (los *landscape splines* de Unreal o los circuitos de Forza): no
+una malla flotando sobre otra, sino **esculpir el terreno bajo el corredor** de
+la calzada (`makeTrackCarve`):
+
+- la cinta es una malla densa (estaciones cada 0,5 m, carriles cada ≤1 m) ceñida
+  al terreno analítico — la misma función que usa la física, al centímetro;
+- los vértices de la hierba bajo la calzada quedan entre 2 cm y ~11 cm por debajo
+  de la cinta (la holgura crece con la curvatura local, que es lo que la cuerda
+  de la malla puede levantarse sobre ella);
+- desde el borde el terreno **desciende en pendiente suave** hasta su altura
+  natural (nunca se rellena hacia arriba), sin peldaño de arcén: en llano son
+  2 cm de diferencia sobre 3,75 m de mezcla.
+
+La garantía está medida en `physics-smoke`: la hierba nunca asoma por la pista
+(holgura mínima ≥12 mm con rugosidad 0–2) y el borde baja en pendiente. Si se
+cambia la rugosidad en vivo se reconstruyen la **malla del terreno esculpida**,
+las calzadas y las barreras (con rebote de 250 ms). La decoración nunca nace
+sobre ninguna calzada.
 
 El mapa está cerrado: una barrera a rayas rojas y blancas marca el perímetro (±150 m) y un muro invisible recorta la posición a ±148 m amortiguando la salida, así que es imposible salirse del mundo o caer al vacío.
 
@@ -96,7 +121,7 @@ La cámara de persecución no se aleja más de un **5 %** de la distancia elegid
 
 | | ⚡ Tesla Model 3 | 🛻 Todoterreno 4x4 | 🚗 Kwid Outsider |
 | --- | --- | --- | --- |
-| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (carrocería Tripo `car_kwid_model/` → `kwid_tripo.glb` + ruedas generadas `scripts/kwid_wheels_export.py` → `kwid_wheels.glb`, estilo contorno) |
+| Estilo | berlina eléctrica (Tripo `car_tesla_model/` → `tesla.glb`, ruedas y llantas del modelo, estilo contorno) | pick-up de rally-raid | crossover urbano (carrocería Tripo + ruedas en `public/assets/cars/kwid.blend` → `kwid_tripo.glb` + `kwid_wheels.glb` vía `scripts/kwid_wheels_export.py`, estilo contorno) |
 
 #### Iterar el modelo del Tesla
 El `.blend` (`car_tesla_model/`, ignorado por git) se convierte al `.glb` del
@@ -122,6 +147,29 @@ masas del coche activo.
 - **Chasis rígido**: 6 DOF — posición + cuaternión, velocidad lineal y angular en el marco del cuerpo. Integración semi-implícita de Euler a paso fijo **300 Hz**.
 - **4 masas no suspendidas** (una por rueda): 1 DOF vertical cada una, lo que permite el *wheel hop* real (~11 Hz) junto con el modo de balanceo del chasis (~1,5 Hz).
 - **4 ruedas**: giro propio gobernado por el par motriz, el freno y la fuerza longitudinal del neumático.
+
+#### Vibración a alta velocidad: qué la causaba
+Dos artefactos numéricos, ninguno de física (medidos con sondas headless):
+
+1. **Muestreo del render sin interpolar** (el causante de la vibración yendo
+   rápido): la física corre a 300 Hz pero el dibujo a dt de frame, y renderizar
+   el último subpaso completo hacía que el coche "aterrizara" en fases distintas
+   del acumulador cada fotograma — un vaivén proporcional a la velocidad
+   (**±10 cm por fotograma a 115 km/h**, medido). El render ahora interpola
+   entre el penúltimo y el último subpaso (`Vehicle.renderPosition`, α =
+   acumulador/dt): la trayectoria dibujada es uniforme salvo ruido físico
+   (<0,25 mm por fotograma, medido).
+2. **Ring del giro de rueda** (0,5–6 m/s, sobre todo al soltar el gas): la
+   constante de tiempo de ∂Fx/∂ω (~0,3 ms con vRef clampeado a 1,2 m/s) queda
+   muy por debajo del paso (3,3 ms) y el Euler explícito entraba en ciclo
+   límite (ringing de 20–140 Hz, hasta 1,8 g medidos). El término rígido se
+   integra ahora semi-implícito (mismo punto fijo `par = Fx·R`, misma física) y
+   el filtro de deslizamiento lleva un piso de frecuencia (`SLIP_RATE_MIN`,
+   τ≈33 ms) porque el modelo de longitud de relajación (σ/v) tiende a τ→∞ al
+   bajar la velocidad.
+
+Ambos quedan blindados por pruebas en `physics-smoke` («El render interpolado no
+tiembla…», «Sin ringing del giro de rueda…»).
 - **Ejes del coche**: morro a **+Z**, arriba **+Y** y derecha del conductor a **−X**. `steer > 0` (tecla D) es girar a la derecha: las ruedas apuntan hacia −X.
 
 ### Suspensión (doble horquilla)
@@ -216,7 +264,7 @@ Las rocas y troncos son sólidos: publican un colisionador cilíndrico consultad
 
 ## Mundo y assets
 
-El terreno es analítico (`Terrain.heightAt`), la misma función para física y malla, con colinas, zona plana de salida, meseta y un tramo de badenes ajustable en vivo.
+El terreno es analítico (`Terrain.heightAt`), la misma función para física y malla, con colinas, zona plana de salida, meseta y un tramo de badenes ajustable en vivo. La malla se **esculpe bajo las calzadas** (ver «Circuitos y mapa cerrado») para que la hierba nunca asoma por la pista; la física sigue midiendo sobre la superficie analítica.
 
 La vegetación y las rocas son modelos **CC0 del [Kenney Nature Kit](https://kenney.nl/assets/nature-kit)**, en glTF binario optimizado (17 piezas de 16 a 230 triángulos, ~180 KB en total, ver `public/assets/nature/LICENSE.md`). Se dibujan con `InstancedMesh` —1200 piezas en 31 draw calls— repartidas con un PRNG determinista y alineadas a la pendiente, con más densidad alrededor del paddock para que sirvan de puntos de referencia al conducir. La paleta original del pack (vegetación turquesa, madera salmón) se armoniza hacia tonos naturales al cargar.
 

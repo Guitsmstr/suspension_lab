@@ -16,6 +16,7 @@ import {
   buildBoundary,
   buildTrack,
   enforceTrackBounds,
+  makeTrackCarve,
   routeKeepOut,
   trackSpawn,
   type TrackHandle,
@@ -102,7 +103,9 @@ async function boot(): Promise<void> {
 
     const params = new ParamStore();
     const terrain = new Terrain(params);
-    let terrainMesh = terrain.buildMesh();
+    // La malla del terreno va esculpida bajo las calzadas: la hierba nunca
+    // asoma por la pista (ver `makeTrackCarve`).
+    let terrainMesh = terrain.buildMesh(320, 320, makeTrackCarve(terrain));
     scene.add(terrainMesh);
 
     loader.setProgress(0.28, 'Cargando vegetación y rocas');
@@ -137,7 +140,7 @@ async function boot(): Promise<void> {
     const scheduleRoadRefresh = (): void => {
       window.clearTimeout(roadTimer);
       roadTimer = window.setTimeout(() => {
-        const fresh = terrain.buildMesh();
+        const fresh = terrain.buildMesh(320, 320, makeTrackCarve(terrain));
         scene.remove(terrainMesh);
         terrainMesh.geometry.dispose();
         terrainMesh = fresh;
@@ -391,6 +394,11 @@ async function boot(): Promise<void> {
         }
         if (input.consumePress('Escape') && menu.open) menu.hide();
 
+        // Fase del render dentro del último subpaso de física (0..1): el dibujo
+        // interpola con ella entre el penúltimo y el último subpaso. Si no hay
+        // subpaso nuevo (pausa), ambos estados coinciden y no hay nada que
+        // interpolar.
+        let renderAlpha = 1;
         if (!paused) {
           accumulator += dt;
           let steps = 0;
@@ -404,7 +412,7 @@ async function boot(): Promise<void> {
             steps++;
           }
           if (steps === MAX_SUBSTEPS) accumulator = 0;
-
+          renderAlpha = Math.min(1, Math.max(0, accumulator / PHYSICS_DT));
           // Muro invisible: el mapa está cerrado
           enforceTrackBounds(vehicle);
 
@@ -427,9 +435,9 @@ async function boot(): Promise<void> {
           if (vehicle.position.y < -40) vehicle.reset();
         }
 
-        car.update(vehicle, dt);
-        cameraRig.apply(camera, vehicle, dt);
-        followSun(env, vehicle.position);
+        car.update(vehicle, dt, renderAlpha);
+        cameraRig.apply(camera, vehicle, dt, renderAlpha);
+        followSun(env, car.group.position);
         panel.update(vehicle.telemetry);
 
         renderer.render(scene, camera);

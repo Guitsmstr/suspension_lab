@@ -15,10 +15,14 @@
  *   · `stadium` — "Estadio Rallycross" (~290 m): técnico centro-oeste
  *     alrededor de la meseta: horquilla y esses.
  *
- * - Las calzadas son cintas 3D ceñidas al terreno analítico (la misma función
- *   de altura que usa la física) con un lift mínimo (3 cm), así que las
- *   ruedas pisan la cinta sin enterrarse… salvo que el usuario cambie la
- *   rugosidad en vivo, en cuyo caso se reconstruyen (ver `refresh()`).
+ * - La calzada es una malla densa (estaciones cada 0,5 m, carriles cada ≤1 m)
+ *   ceñida al terreno analítico (la misma función de altura que usa la física),
+ *   y el terreno se ESCULPE bajo su corredor (`makeTrackCarve`): los vértices
+ *   de la malla de hierba quedan bajo la superficie de la cinta y descienden
+ *   en pendiente suave hacia su altura natural, así la hierba nunca asoma por
+ *   la pista ni hay que pelear el z-buffer. Es la técnica de los juegos AAA
+ *   (landscape-spline de Unreal / Forza): una sola superficie continua, no dos
+ *   mallas superpuestas.
  * - El asfalto lleva pianos rojo/blanco en las curvas; la tierra, conos
  *   naranjas marcando la trazada.
  * - La decoración evita los trazados (ver `routeKeepOut()`, usado por scenery).
@@ -195,10 +199,14 @@ const lineMat = new THREE.MeshStandardMaterial({
 });
 const curbMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
 const coneMat = new THREE.MeshStandardMaterial({ color: 0xe8641c, roughness: 0.7, metalness: 0 });
-/** La calzada vuela sobre el terreno analítico (ver `buildTrack`). */
-const ROAD_LIFT = 0.03;
-/** Las líneas y la meta vuelan un poco más para no pelear el z-buffer. */
-const PAINT_LIFT = ROAD_LIFT + 0.045;
+/**
+ * La cinta se apoya exactamente sobre el terreno analítico: la holgura contra
+ * la hierba no la da un lift (que enterraría visualmente las ruedas en la
+ * calzada) sino el esculpido del terreno bajo el corredor (`makeTrackCarve`).
+ */
+const ROAD_LIFT = 0;
+/** La pintura (líneas y meta) vuela un poco sobre el asfalto. */
+const PAINT_LIFT = 0.008;
 const CURB_RED = new THREE.Color(0xc23b2e);
 const CURB_WHITE = new THREE.Color(0xe8e6e2);
 
@@ -230,56 +238,240 @@ export function trackLength(def: TrackDef): number {
   return trackCurve(def).getLength();
 }
 
+// ---------------- Malla de calzada (malla densa + superficie consultable) ----------------
+
+/** Estaciones cada 0,5 m y carriles cada ≤1 m: sin cuerdas visibles sobre el terreno. */
+const ROAD_STATION_SPACING = 0.5;
+const ROAD_LANE_SPACING = 1;
 /**
- * Cinta de calzada: dos vértices por estación (borde izq./der.), cada uno a la
- * altura del terreno bajo sus propios pies + `lift`. Normales del terreno para
- * que la luz acompañe las pendientes.
+ * Holgura bajo la cinta para que la malla del terreno nunca asome [m]. La
+ * cinta y la hierba son dos interpolaciones distintas de la misma función de
+ * altura: entre vértices, la cuerda de la hierba (paso 1 m) puede quedar sobre
+ * la de la cinta en valles y bordes. `CARVE_MIN` cubre el caso plano y
+ * `CARVE_CURV`·curvatura el resto (en los badenes, ~11 cm): ver `makeTrackCarve`.
  */
-function ribbonGeometry(
-  center: THREE.Vector3[],
-  halfWidth: number,
+const CARVE_MIN = 0.02;
+const CARVE_CURV = 0.25;
+const CARVE_MAX = 0.11;
+/** Zona de corte completo justo fuera del borde [m]: cubre la diagonal de un vértice de la malla del terreno (paso 1 m). */
+const CARVE_FULL = 0.75;
+/** Anchura de la bajada hacia la altura natural, medida desde el final del corte completo [m]. */
+const CARVE_SHOULDER = 3;
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Estación de la malla de calzada: un punto del eje con sus alturas por carril. */
+interface RoadStation {
+  x: number;
+  z: number;
+  /** Tangente normalizada en planta (para hallar la lateral). */
+  tx: number;
+  tz: number;
+  /** Distancia acumulada desde la salida [m] (UVs y tramos). */
+  dist: number;
+  /** Altura de cada carril [m] (terreno analítico bajo el carril + lift). */
+  y: number[];
+  /** Holgura bajo la cinta en cada carril [m] (ver `CARVE_MIN`). */
+  eps: number[];
+}
+
+/** Malla de calzada de un trazado: eje muestreado fino y alturas por carril. */
+export interface RoadGrid {
+  def: TrackDef;
+  /** Desplazamiento lateral de cada carril [m], de −ancho/2 a +ancho/2. */
+  lanes: number[];
+  stations: RoadStation[];
+}
+
+/** Construye la malla densa de la calzada: la superficie de referencia del trazado. */
+function buildRoadGrid(def: TrackDef, terrain: Terrain, lift: number): RoadGrid {
+  const curve = trackCurve(def);
+  const n = Math.max(16, Math.ceil(curve.getLength() / ROAD_STATION_SPACING));
+  const center = curve.getSpacedPoints(n).slice(0, n);
+  const hw = def.width / 2;
+  const laneCount = Math.max(2, Math.ceil(def.width / ROAD_LANE_SPACING) + 1);
+  const lanes: number[] = [];
+  for (let j = 0; j < laneCount; j++) lanes.push(-hw + (def.width * j) / (laneCount - 1));
+
+  const stations: RoadStation[] = [];
+  const tangent = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const p = center[i];
+    tangent.subVectors(center[(i + 1) % n], center[(i - 1 + n) % n]).setY(0);
+    if (tangent.lengthSq() < 1e-8) tangent.set(1, 0, 0);
+    else tangent.normalize();
+    const sx = -tangent.z;
+    const sz = tangent.x;
+    const y: number[] = [];
+    for (let j = 0; j < laneCount; j++) {
+      const o = lanes[j];
+      y.push(terrain.heightAt(p.x + sx * o, p.z + sz * o) + lift);
+    }
+    const dist = i > 0 ? stations[i - 1].dist + Math.hypot(p.x - center[i - 1].x, p.z - center[i - 1].z) : 0;
+    stations.push({ x: p.x, z: p.z, tx: tangent.x, tz: tangent.z, dist, y, eps: [] });
+  }
+
+  // Holgura por carril: la curvatura local (segundas diferencias de las alturas
+  // de la propia cinta, normalizadas a paso 1 m) mide el máximo que la cuerda
+  // de la malla del terreno puede levantarse sobre la cinta.
+  for (let i = 0; i < n; i++) {
+    const a = stations[(i - 1 + n) % n];
+    const b = stations[i];
+    const c = stations[(i + 1) % n];
+    const laneStep = lanes.length > 1 ? lanes[1] - lanes[0] : 1;
+    for (let j = 0; j < laneCount; j++) {
+      const d2Along = Math.abs(a.y[j] - 2 * b.y[j] + c.y[j]) / (ROAD_STATION_SPACING * ROAD_STATION_SPACING);
+      const j0 = Math.max(0, j - 1);
+      const j1 = Math.min(laneCount - 1, j + 1);
+      const d2Lat =
+        j0 === j1 ? 0 : Math.abs(b.y[j0] - 2 * b.y[j] + b.y[j1]) / (laneStep * laneStep);
+      b.eps[j] = Math.min(CARVE_MAX, CARVE_MIN + CARVE_CURV * Math.max(d2Along, d2Lat));
+    }
+  }
+
+  return { def, lanes, stations };
+}
+
+/** Muestra de la cinta: altura y holgura interpoladas en una lateral. */
+interface GridSample {
+  y: number;
+  eps: number;
+}
+
+// Scratch para las consultas (el esculpido evalúa muchos vértices sin asignar).
+const sampleA: GridSample = { y: 0, eps: 0 };
+const sampleB: GridSample = { y: 0, eps: 0 };
+
+/** Altura de la cinta y holgura en una estación, interpoladas en la lateral `o` (clampeada al borde). */
+function gridSample(grid: RoadGrid, station: RoadStation, o: number, out: GridSample): GridSample {
+  const lanes = grid.lanes;
+  const n = lanes.length;
+  const oc = Math.min(lanes[n - 1], Math.max(lanes[0], o));
+  let j = 0;
+  while (j < n - 2 && lanes[j + 1] < oc) j++;
+  const span = lanes[j + 1] - lanes[j];
+  const f = span > 1e-9 ? (oc - lanes[j]) / span : 0;
+  out.y = station.y[j] + (station.y[j + 1] - station.y[j]) * f;
+  out.eps = station.eps[j] + (station.eps[j + 1] - station.eps[j]) * f;
+  return out;
+}
+
+/**
+ * Altura del terreno ya esculpido en la lateral `o` de una estación: bajo la
+ * calzada queda `holgura` por debajo de la cinta y hacia fuera desciende en
+ * pendiente suave hasta su altura natural. Es la misma superficie que genera
+ * `makeTrackCarve` (el mobiliario debe apoyarse en ella).
+ */
+function carvedHeight(
+  grid: RoadGrid,
+  terrain: Terrain,
+  x: number,
+  z: number,
+  station: RoadStation,
+  o: number,
+): number {
+  const hw = grid.def.width / 2;
+  const ao = Math.abs(o);
+  const w = 1 - smoothstep(hw + CARVE_FULL, hw + CARVE_FULL + CARVE_SHOULDER, ao);
+  const natural = terrain.heightAt(x, z);
+  if (w <= 0) return natural;
+  // Mismo criterio que `makeTrackCarve`: ancla en el borde fuera de la
+  // calzada, sin relleno y con la holgura mínima.
+  gridSample(grid, station, ao <= hw ? o : o < 0 ? -hw : hw, sampleA);
+  const target = Math.min(sampleA.y - sampleA.eps, natural - CARVE_MIN);
+  return natural + (target - natural) * w;
+}
+
+/**
+ * Malla de la calzada: rejilla estación × carril siguiendo el terreno
+ * analítico. Devanado antihorario visto desde arriba (+Y).
+ */
+function roadGeometry(grid: RoadGrid, terrain: Terrain): THREE.BufferGeometry {
+  const n = grid.stations.length;
+  const laneCount = grid.lanes.length;
+  const positions = new Float32Array(n * laneCount * 3);
+  const normals = new Float32Array(n * laneCount * 3);
+  const uvs = new Float32Array(n * laneCount * 2);
+  const nrm = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    const st = grid.stations[i];
+    const sx = -st.tz;
+    const sz = st.tx;
+    for (let j = 0; j < laneCount; j++) {
+      const o = grid.lanes[j];
+      const x = st.x + sx * o;
+      const z = st.z + sz * o;
+      const k = i * laneCount + j;
+      positions[k * 3] = x;
+      positions[k * 3 + 1] = st.y[j];
+      positions[k * 3 + 2] = z;
+      terrain.normalAt(x, z, nrm);
+      normals[k * 3] = nrm.x;
+      normals[k * 3 + 1] = nrm.y;
+      normals[k * 3 + 2] = nrm.z;
+      uvs[k * 2] = st.dist / 8;
+      uvs[k * 2 + 1] = (o + grid.def.width / 2) / grid.def.width;
+    }
+  }
+  const index: number[] = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < laneCount - 1; j++) {
+      const a = i * laneCount + j;
+      const b = i * laneCount + j + 1;
+      const c = ((i + 1) % n) * laneCount + j;
+      const d = ((i + 1) % n) * laneCount + j + 1;
+      index.push(a, b, c, b, d, c);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(index);
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+/**
+ * Cinta fina de pintura (líneas de borde) sobre la calzada: dos vértices por
+ * estación a ambos lados de la lateral pedida, sobre la altura de la cinta.
+ */
+function paintGeometry(
+  grid: RoadGrid,
   lateral: number,
+  halfWidth: number,
   lift: number,
   terrain: Terrain,
 ): THREE.BufferGeometry {
-  const n = center.length;
+  const n = grid.stations.length;
   const positions = new Float32Array(n * 2 * 3);
   const normals = new Float32Array(n * 2 * 3);
   const uvs = new Float32Array(n * 2 * 2);
-  const tangent = new THREE.Vector3();
-  const side = new THREE.Vector3();
   const nrm = new THREE.Vector3();
-  let dist = 0;
-
   for (let i = 0; i < n; i++) {
-    const p = center[i];
-    tangent.subVectors(center[(i + 1) % n], center[(i - 1 + n) % n]);
-    tangent.y = 0;
-    if (tangent.lengthSq() < 1e-8) tangent.set(1, 0, 0);
-    else tangent.normalize();
-    side.set(-tangent.z, 0, tangent.x);
-    if (i > 0) dist += center[i].distanceTo(center[i - 1]);
-
+    const st = grid.stations[i];
+    const sx = -st.tz;
+    const sz = st.tx;
     for (let s = 0; s < 2; s++) {
-      const off = lateral + (s === 0 ? -halfWidth : halfWidth);
-      const x = p.x + side.x * off;
-      const z = p.z + side.z * off;
-      const y = terrain.heightAt(x, z) + lift;
+      const o = lateral + (s === 0 ? -halfWidth : halfWidth);
+      const x = st.x + sx * o;
+      const z = st.z + sz * o;
+      const y = gridSample(grid, st, o, sampleA).y + lift;
       const k = i * 2 + s;
       positions[k * 3] = x;
       positions[k * 3 + 1] = y;
       positions[k * 3 + 2] = z;
-      if (terrain.normalAt) terrain.normalAt(x, z, nrm);
-      else nrm.set(0, 1, 0);
+      terrain.normalAt(x, z, nrm);
       normals[k * 3] = nrm.x;
       normals[k * 3 + 1] = nrm.y;
       normals[k * 3 + 2] = nrm.z;
-      uvs[k * 2] = dist / 8;
+      uvs[k * 2] = st.dist / 8;
       uvs[k * 2 + 1] = s;
     }
   }
-
-  // Devando antihorario visto desde arriba (+Y): la calzada mira al cielo.
   const index: number[] = [];
   for (let i = 0; i < n; i++) {
     const a = i * 2;
@@ -288,7 +480,6 @@ function ribbonGeometry(
     const d = ((i + 1) % n) * 2 + 1;
     index.push(a, b, c, b, d, c);
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
@@ -307,48 +498,70 @@ export interface TrackHandle {
 /**
  * Pianos rojo/blanco en las curvas del asfalto: donde el cambio de rumbo por
  * estación supera el umbral se colocan dos losas (una por borde) alternando
- * color cada ~4 m. Instanciado en una sola malla.
+ * color cada ~4 m. Apoyadas sobre el terreno ya esculpido. Instanciado en una
+ * sola malla.
  */
 function buildCurbs(
   def: TrackDef,
-  center: THREE.Vector3[],
+  grid: RoadGrid,
   terrain: Terrain,
   group: THREE.Group,
 ): void {
-  const n = center.length;
+  const n = grid.stations.length;
   const spots: Array<{ x: number; z: number; y: number; yaw: number; red: boolean }> = [];
-  const a = new THREE.Vector3();
-  const b = new THREE.Vector3();
   let dist = 0;
-  for (let i = 0; i < n; i += 2) {
-    const p0 = center[(i - 2 + n) % n];
-    const p1 = center[i];
-    const p2 = center[(i + 2) % n];
-    a.subVectors(p1, p0).setY(0);
-    b.subVectors(p2, p1).setY(0);
-    dist += a.length();
-    const turn = a.lengthSq() > 1e-6 && b.lengthSq() > 1e-6 ? a.angleTo(b) : 0;
+  let prevDist = 0;
+  for (let i = 0; i < n; i += 8) {
+    const p0 = grid.stations[(i - 8 + n) % n];
+    const p1 = grid.stations[i];
+    const p2 = grid.stations[(i + 8) % n];
+    prevDist = dist;
+    dist = p1.dist;
+    const ax = p1.x - p0.x;
+    const az = p1.z - p0.z;
+    const bx = p2.x - p1.x;
+    const bz = p2.z - p1.z;
+    const la = Math.hypot(ax, az);
+    const lb = Math.hypot(bx, bz);
+    const turn = la > 1e-6 && lb > 1e-6 ? Math.acos(Math.max(-1, Math.min(1, (ax * bx + az * bz) / (la * lb)))) : 0;
     if (turn < 0.11) continue; // solo curvas de verdad
-    const yaw = Math.atan2(b.x, b.z);
-    const dir = new THREE.Vector3().subVectors(p2, p0).setY(0).normalize();
-    const sx = -dir.z;
-    const sz = dir.x;
-    const red = Math.floor(dist / 4) % 2 === 0;
+    const red = Math.floor((prevDist + dist) / 8) % 2 === 0;
     for (const s of [-1, 1]) {
-      const x = p1.x + sx * s * (def.width / 2 + 0.35);
-      const z = p1.z + sz * s * (def.width / 2 + 0.35);
-      spots.push({ x, z, y: terrain.heightAt(x, z) + ROAD_LIFT + 0.035, yaw, red });
+      const o = s * (def.width / 2 + 0.35);
+      // Cada piano son 3 losas de 1 m (como los reales) sobre 3 estaciones
+      // seguidas: cada una toma su lateral, altura esculpida, rumbo y caída
+      // con la normal del terreno. Una losa larga deja sus extremos flotando
+      // en las curvas cerradas y las laderas.
+      for (let j = -2; j <= 2; j += 2) {
+        const st = grid.stations[(i + j + n) % n];
+        const cx = st.x - st.tz * o;
+        const cz = st.z + st.tx * o;
+        spots.push({
+          x: cx,
+          z: cz,
+          y: carvedHeight(grid, terrain, cx, cz, st, o) + 0.02,
+          yaw: Math.atan2(st.tx, st.tz),
+          red,
+        });
+      }
     }
   }
   if (spots.length === 0) return;
-  const geo = new THREE.BoxGeometry(0.7, 0.07, 2.4);
+  const geo = new THREE.BoxGeometry(0.7, 0.07, 1.02);
   const inst = new THREE.InstancedMesh(geo, curbMat, spots.length);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
+  const tilt = new THREE.Quaternion();
   const up = new THREE.Vector3(0, 1, 0);
+  const nrm = new THREE.Vector3();
   const sc = new THREE.Vector3(1, 1, 1);
   spots.forEach((s, i) => {
+    // Rumbo de la losa + caída con la normal del terreno: el hombro desciende
+    // hacia fuera y una losa plana flotaría sobre él. Se incrusta 1,5 cm.
     q.setFromAxisAngle(up, s.yaw);
+    terrain.normalAt(s.x, s.z, nrm);
+    tilt.setFromUnitVectors(up, nrm);
+    q.premultiply(tilt);
     m.compose(new THREE.Vector3(s.x, s.y, s.z), q, sc);
     inst.setMatrixAt(i, m);
     inst.setColorAt(i, s.red ? CURB_RED : CURB_WHITE);
@@ -361,26 +574,25 @@ function buildCurbs(
 
 /**
  * Conos naranjas cada ~18 m en ambos bordes de la tierra: marcan la trazada
- * donde no hay líneas pintadas.
+ * donde no hay líneas pintadas. Sobre el terreno ya esculpido.
  */
 function buildCones(
   def: TrackDef,
-  center: THREE.Vector3[],
+  grid: RoadGrid,
   terrain: Terrain,
   group: THREE.Group,
 ): void {
-  const n = center.length;
+  const n = grid.stations.length;
   const spots: Array<{ x: number; z: number; y: number }> = [];
-  const tangent = new THREE.Vector3();
-  for (let i = 0; i < n; i += 9) {
-    const p = center[i];
-    tangent.subVectors(center[(i + 1) % n], center[(i - 1 + n) % n]).setY(0).normalize();
-    const sx = -tangent.z;
-    const sz = tangent.x;
+  for (let i = 0; i < n; i += 36) {
+    const st = grid.stations[i];
+    const sx = -st.tz;
+    const sz = st.tx;
     for (const s of [-1, 1]) {
-      const x = p.x + sx * s * (def.width / 2 + 0.8);
-      const z = p.z + sz * s * (def.width / 2 + 0.8);
-      spots.push({ x, z, y: terrain.heightAt(x, z) });
+      const o = s * (def.width / 2 + 0.8);
+      const x = st.x + sx * o;
+      const z = st.z + sz * o;
+      spots.push({ x, z, y: carvedHeight(grid, terrain, x, z, st, o) });
     }
   }
   if (spots.length === 0) return;
@@ -400,7 +612,6 @@ function buildCones(
 export function buildTrack(def: TrackDef, terrain: Terrain): TrackHandle {
   const group = new THREE.Group();
   group.name = `track-${def.id}`;
-  const curve = trackCurve(def);
 
   const build = (): void => {
     for (const child of [...group.children]) {
@@ -409,47 +620,45 @@ export function buildTrack(def: TrackDef, terrain: Terrain): TrackHandle {
       anyMesh.geometry?.dispose();
       group.remove(child);
     }
-    // getSpacedPoints en curva cerrada repite el primero al final: se quita.
-    const center = curve.getSpacedPoints(420).slice(0, 420);
+    // Malla densa de la calzada: estaciones cada 0,5 m y carriles cada ≤1 m.
+    // La cinta sigue el terreno analítico exacto (la misma función que la
+    // física) y el terreno se esculpe bajo ella (`makeTrackCarve`), así que la
+    // hierba nunca asoma: la holgura la da el esculpido, no un lift, para que
+    // las ruedas no queden visualmente enterradas en la calzada.
+    const grid = buildRoadGrid(def, terrain, ROAD_LIFT);
     const mat = def.surface === 'asfalto' ? asphaltMat : dirtMat;
-    // La malla del terreno interpola linealmente entre vértices (paso 1 m)
-    // mientras la cinta sigue la altura analítica exacta: en los badenes
-    // (onda de 2,8 m) la cuerda de la malla puede quedar ~10 cm por debajo
-    // del valle real. El lift deja la calzada por encima también ahí, pero
-    // lo justo (3 cm: la física rueda sobre el terreno analítico, así que un
-    // lift mayor entierra visualmente las ruedas en la calzada).
-    const road = new THREE.Mesh(ribbonGeometry(center, def.width / 2, 0, ROAD_LIFT, terrain), mat);
+    const road = new THREE.Mesh(roadGeometry(grid, terrain), mat);
     road.receiveShadow = true;
     group.add(road);
 
     if (def.edgeLines) {
       for (const lateral of [-def.width / 2 + 0.45, def.width / 2 - 0.45]) {
-        const line = new THREE.Mesh(ribbonGeometry(center, 0.18, lateral, PAINT_LIFT, terrain), lineMat);
+        const line = new THREE.Mesh(paintGeometry(grid, lateral, 0.18, PAINT_LIFT, terrain), lineMat);
         line.receiveShadow = true;
         group.add(line);
       }
-      buildCurbs(def, center, terrain, group);
+      buildCurbs(def, grid, terrain, group);
     } else {
-      buildCones(def, center, terrain, group);
+      buildCones(def, grid, terrain, group);
     }
 
-    // Línea de salida/meta atravesada en el primer punto
-    const p0 = center[0];
-    const p1 = center[1];
-    const tangent = new THREE.Vector3().subVectors(p1, p0).setY(0).normalize();
-    const side = new THREE.Vector3(-tangent.z, 0, tangent.x);
+    // Línea de salida/meta atravesada en el primer punto: cuatro esquinas
+    // sobre la cinta (altura de la calzada, no del terreno natural).
+    const st0 = grid.stations[0];
     const hw = def.width / 2;
-    const y0 = terrain.heightAt(p0.x + side.x * -hw, p0.z + side.z * -hw) + PAINT_LIFT;
-    const y1 = terrain.heightAt(p0.x + side.x * hw, p0.z + side.z * hw) + PAINT_LIFT;
+    const sx = -st0.tz;
+    const sz = st0.tx;
+    const yL = gridSample(grid, st0, -hw, sampleA).y + PAINT_LIFT;
+    const yR = gridSample(grid, st0, hw, sampleA).y + PAINT_LIFT;
     const startGeo = new THREE.BufferGeometry();
     startGeo.setAttribute(
       'position',
       new THREE.BufferAttribute(
         new Float32Array([
-          p0.x + side.x * -hw - tangent.x * 0.6, y0, p0.z + side.z * -hw - tangent.z * 0.6,
-          p0.x + side.x * -hw + tangent.x * 0.6, y0, p0.z + side.z * -hw + tangent.z * 0.6,
-          p0.x + side.x * hw - tangent.x * 0.6, y1, p0.z + side.z * hw - tangent.z * 0.6,
-          p0.x + side.x * hw + tangent.x * 0.6, y1, p0.z + side.z * hw + tangent.z * 0.6,
+          st0.x + sx * -hw - st0.tx * 0.6, yL, st0.z + sz * -hw - st0.tz * 0.6,
+          st0.x + sx * -hw + st0.tx * 0.6, yL, st0.z + sz * -hw + st0.tz * 0.6,
+          st0.x + sx * hw - st0.tx * 0.6, yR, st0.z + sz * hw - st0.tz * 0.6,
+          st0.x + sx * hw + st0.tx * 0.6, yR, st0.z + sz * hw + st0.tz * 0.6,
         ]),
         3,
       ),
@@ -463,6 +672,146 @@ export function buildTrack(def: TrackDef, terrain: Terrain): TrackHandle {
 
   build();
   return { group, refresh: build };
+}
+
+// ---------------- Esculpido del terreno bajo las calzadas ----------------
+
+/**
+ * Esculpido del terreno bajo las calzadas (lo que hacen los "landscape splines"
+ * de Unreal o los circuitos de Forza): la pista y la hierba son dos
+ * interpolaciones distintas de la misma función de altura y se cruzan en valles
+ * y bordes — la hierba asomaba por la calzada. La solución de los juegos AAA no
+ * es una malla flotando sobre otra sino esculpir el terreno bajo el corredor de
+ * la calzada y fundirlo en pendiente suave con su altura natural.
+ *
+ * La función devuelta da la altura FINAL del terreno en (x, z): bajo la
+ * calzada queda `CARVE_MIN` + curvatura por debajo de la cinta (en los badenes
+ * ~11 cm: la cuerda de la malla del terreno se levanta sobre la cinta en los
+ * valles) y desde el borde desciende en pendiente suave hasta el terreno
+ * natural, sin peldaño: la pendiente de integración de los circuitos reales.
+ * Solo se rebaja el terreno, nunca se rellena, así la hierba es imposible que
+ * asome por la pista sea cual sea la pendiente.
+ *
+ * Se pasa a `Terrain.buildMesh`. La física no se toca: `Terrain.heightAt`
+ * sigue siendo la superficie analítica de contacto y la cinta la sigue al
+ * centímetro. Solo hay una malla visible por encima de otra dentro del
+ * corredor, y siempre por debajo de ella.
+ */
+export interface TrackCarve {
+  /** Altura final del terreno en (x, z): natural esculpida bajo las calzadas. */
+  (x: number, z: number): number;
+  /** Altura de la cinta bajo (x, z); `null` si no hay calzada ahí. */
+  roadHeight(x: number, z: number): number | null;
+}
+export function makeTrackCarve(terrain: Terrain): TrackCarve {
+  // Se usa la misma `buildRoadGrid` que la malla de la calzada: esculpido y
+  // cinta comparten superficie por construcción.
+  const grids = TRACK_ORDER.map((id) => buildRoadGrid(TRACKS[id], terrain, ROAD_LIFT));
+
+  // Índice de segmentos por celda: cada consulta solo mira las calzadas cercanas.
+  const CELL = 4;
+  const index = new Map<string, Array<{ grid: RoadGrid; i: number }>>();
+  for (const grid of grids) {
+    const reach = Math.ceil((grid.def.width / 2 + CARVE_SHOULDER) / CELL) + 1;
+    for (let i = 0; i < grid.stations.length; i++) {
+      const st = grid.stations[i];
+      const cx = Math.floor(st.x / CELL);
+      const cz = Math.floor(st.z / CELL);
+      for (let dx = -reach; dx <= reach; dx++) {
+        for (let dz = -reach; dz <= reach; dz++) {
+          const key = `${cx + dx},${cz + dz}`;
+          const entry = { grid, i };
+          const list = index.get(key);
+          if (list) list.push(entry);
+          else index.set(key, [entry]);
+        }
+      }
+    }
+  }
+
+  // Resultado de la última consulta (sin asignar en el bucle de esculpido).
+  const res = { w: 0, roadY: 0, target: 0, absO: Infinity, hw: 0 };
+
+  const find = (x: number, z: number, natural: number): void => {
+    res.w = 0;
+    res.roadY = 0;
+    res.target = 0;
+    res.absO = Infinity;
+    res.hw = 0;
+    const list = index.get(`${Math.floor(x / CELL)},${Math.floor(z / CELL)}`);
+    if (!list) return;
+    let bestDist = Infinity;
+    let bestTarget = 0;
+    for (let k = 0; k < list.length; k++) {
+      const grid = list[k].grid;
+      const hw = grid.def.width / 2;
+      const st0 = grid.stations[list[k].i];
+      const st1 = grid.stations[(list[k].i + 1) % grid.stations.length];
+      const dx = st1.x - st0.x;
+      const dz = st1.z - st0.z;
+      const len2 = dx * dx + dz * dz;
+      const uRaw = len2 > 1e-9 ? ((x - st0.x) * dx + (z - st0.z) * dz) / len2 : 0;
+      const u = uRaw < 0 ? 0 : uRaw > 1 ? 1 : uRaw;
+      const ddx = x - (st0.x + dx * u);
+      const ddz = z - (st0.z + dz * u);
+      const dist = Math.hypot(ddx, ddz);
+      // Distancia EUCLÍDEA al segmento (con la proyección clampeada): la
+      // prueba de cápsula de la polilínea. Con el filtro de `u` estricto, un
+      // punto que cae sobre la unión entre dos segmentos (el punto más
+      // cercano es la propia unión) proyectaba fuera de AMBOS y dejaba huecos
+      // de vértices sin esculpir — la hierba asomaba por la pista justo ahí.
+      if (dist > hw + CARVE_FULL + CARVE_SHOULDER) continue;
+      if (dist > bestDist + 1e-9) continue;
+      // lateral firmada respecto a la tangente de la estación (0,5 m: el
+      // desvío entre segmentos es despreciable)
+      const o = ddx * -st0.tz + ddz * st0.tx;
+      const ao = Math.abs(o);
+      // Bajo la calzada la lateral está dentro de los carriles y la altura de
+      // la cinta es la del propio punto. Fuera, se ancla en el borde de la
+      // MISMA estación: clampear la lateral a los carriles traería alturas de
+      // metros de cinta a través de la pendiente (minaba o levantaba el
+      // hombro en las laderas fuertes).
+      const oUse = ao <= hw ? o : o < 0 ? -hw : hw;
+      gridSample(grid, st0, oUse, sampleA);
+      gridSample(grid, st1, oUse, sampleB);
+      const roadY = sampleA.y + (sampleB.y - sampleA.y) * u;
+      const eps = sampleA.eps + (sampleB.eps - sampleA.eps) * u;
+      // Nunca se rellena: el terreno queda como mucho `CARVE_MIN` por debajo
+      // de su altura natural y, bajo la calzada, `holgura` por debajo de la
+      // cinta. Con esto la hierba es imposible que asoma por la pista (la
+      // cuerda de la malla nunca se levanta sobre los valores recortados más
+      // de lo que cubre `eps`, ver CARVE_CURV) y el borde baja en pendiente
+      // suave hasta el terreno natural, sin peldaño.
+      const target = Math.min(roadY - eps, natural - CARVE_MIN);
+      // Manda el corredor más cercano: en las curvas cerradas varios segmentos
+      // tocan el mismo punto y sus alturas difieren en la pendiente — tomar la
+      // mayor mezclaba superficies incoherentes entre puntos vecinos. Con
+      // calzadas solapadas (cruces) gana la más alta.
+      if (dist > bestDist - 1e-9 && target <= bestTarget) continue;
+      bestDist = dist;
+      bestTarget = target;
+      res.roadY = roadY;
+      res.absO = ao;
+      res.hw = hw;
+    }
+    if (bestDist < Infinity) {
+      res.w = 1 - smoothstep(res.hw + CARVE_FULL, res.hw + CARVE_FULL + CARVE_SHOULDER, res.absO);
+      res.target = bestTarget;
+    }
+  };
+
+  const carve = ((x: number, z: number): number => {
+    const natural = terrain.heightAt(x, z);
+    find(x, z, natural);
+    return res.w > 0 ? natural + (res.target - natural) * res.w : natural;
+  }) as TrackCarve;
+
+  carve.roadHeight = (x: number, z: number): number | null => {
+    find(x, z, terrain.heightAt(x, z));
+    return res.w > 0 && res.absO <= res.hw + 1e-6 ? res.roadY : null;
+  };
+
+  return carve;
 }
 
 /**

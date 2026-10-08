@@ -9,7 +9,7 @@
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import type { Vehicle } from '../vehicle/vehicle';
+import type { RenderCornerState, Vehicle } from '../vehicle/vehicle';
 import { CARS, type CarId } from '../vehicle/cars';
 import { loadKwidBody, loadKwidProceduralBody, loadKwidRaw, loadKwidShell, loadSportBody, loadTeslaBody } from './sportBody';
 import type { KwidWheelPart } from './sportBody';
@@ -94,6 +94,16 @@ export class CarVisual {
   private readonly tireHalfW: number;
   private readonly springLen: number;
   private readonly archR: number;
+  /** Scratch para la pose interpolada del render (sin asignaciones por frame). */
+  private readonly renderPos = new THREE.Vector3();
+  private readonly renderQuat = new THREE.Quaternion();
+  private readonly renderCorner: RenderCornerState = {
+    s: 0,
+    steer: 0,
+    camber: 0,
+    tireDeflection: 0,
+    wheelOmega: 0,
+  };
 
   constructor(carId: CarId = 'sport') {
     this.carId = carId;
@@ -984,12 +994,20 @@ export class CarVisual {
     arm.mesh.scale.set(1, 1, len);
   }
 
-  update(vehicle: Vehicle, dt: number): void {
-    this.group.position.copy(vehicle.position);
-    this.group.quaternion.copy(vehicle.quaternion);
+  /**
+   * Actualiza el visual desde la física. `alpha` interpola entre el penúltimo
+   * y el último subpaso (física a paso fijo, dibujo a dt de frame): sin eso el
+   * coche tiembla por fotograma a alta velocidad (ver `Vehicle.renderPosition`).
+   */
+  update(vehicle: Vehicle, dt: number, alpha = 1): void {
+    vehicle.renderPosition(alpha, this.renderPos);
+    vehicle.renderQuaternion(alpha, this.renderQuat);
+    this.group.position.copy(this.renderPos);
+    this.group.quaternion.copy(this.renderQuat);
 
     for (let i = 0; i < 4; i++) {
-      const st = vehicle.cornerStates[i];
+      vehicle.renderCorner(i, alpha, this.renderCorner);
+      const st = this.renderCorner;
       const c = vehicle.corners[i];
       const w = this.wheels[i];
 

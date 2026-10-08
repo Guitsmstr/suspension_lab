@@ -19,6 +19,8 @@ import {
   TRACK_BOUND,
   buildTrack,
   enforceTrackBounds,
+  makeTrackCarve,
+  trackCenterline,
   trackLength,
   trackSpawn,
 } from '../src/world/track';
@@ -133,18 +135,20 @@ scenario('Aceleración en línea recta', (_p, _t, v) => {
     v.step(DT, { ...NO_INPUT, throttle: 0.85 });
     peakGLong = Math.max(peakGLong, v.telemetry.gLong);
     // el patinaje de arranque es esperable; se mide una vez el coche va
-    // rodando y solo sobre asfalto (en hierba patinar es lo correcto)
+    // rodando y solo sobre asfalto (en hierba patinar es lo correcto). La
+    // media cubre todo el tramo rodado en asfalto: si la recta se acaba (el
+    // coche gana más velocidad de la prevista y se sale), la muestra sigue
+    // siendo válida en vez de quedarse vacía (0/0 = NaN).
     if (v.telemetry.speed > 12 && v.telemetry.surface === 'asphalt') {
-      for (const st of v.cornerStates) peakKappa = Math.max(peakKappa, Math.abs(st.kappa));
-    }
-    if (i > steps - 150 && v.telemetry.surface === 'asphalt') {
-      // media del último medio segundo
-      for (const st of v.cornerStates) slipSum += Math.abs(st.kappa);
-      slipSamples += 4;
+      for (const st of v.cornerStates) {
+        peakKappa = Math.max(peakKappa, Math.abs(st.kappa));
+        slipSum += Math.abs(st.kappa);
+        slipSamples += 1;
+      }
     }
   }
   const t = v.telemetry;
-  const meanSlip = slipSum / slipSamples;
+  const meanSlip = slipSamples > 0 ? slipSum / slipSamples : 0;
 
   check('valores finitos', isFiniteVehicle(v));
   check('velocidad > 22 m/s', t.speed > 22, `${t.speed.toFixed(1)} m/s (${t.speedKph.toFixed(0)} km/h)`);
@@ -505,7 +509,7 @@ scenario('Las calzadas ciñen el terreno y caben en el mapa', (_p, terrain, _v) 
 });
 
 // --------------------------------------- 5d. rugosidad al mínimo y al máximo
-scenario('Rugosidad 0 y 2: el coche sigue apoyado y nada se hunde', (p, terrain, v) => {
+scenario('Rugosidad 0 y 2: el coche sigue apoyado y nada se hunde', (p, _terrain, v) => {
   for (const r of [0, 2]) {
     p.set('roughness', r);
     const s = trackSpawn(TRACKS.monaco);
@@ -519,29 +523,82 @@ scenario('Rugosidad 0 y 2: el coche sigue apoyado y nada se hunde', (p, terrain,
   }
   p.set('roughness', 1);
 
-  // La cinta debe volar por encima de la altura analítica en ambas rugosidades:
-  // si algún vértice quedara por debajo, la pista se vería bajo la hierba.
-  // El lift es de solo 3 cm a propósito (la física rueda sobre el terreno
-  // analítico: más lift enterraría visualmente las ruedas en la calzada).
-  for (const r of [0, 2]) {
+  p.set('roughness', 1);
+});
+
+// ------------------- 5d-ter. el terreno nunca asoma por las calzadas
+/**
+ * Superficie renderizada del terreno en (x, z): la malla es una rejilla de
+ * paso 1 m cuyos vértices valen `carve(x, z)`, y entre ellos la GPU interpola
+ * linealmente — esta función reproduce esa interpolación.
+ */
+function meshSurfaceAt(carve: (x: number, z: number) => number, x: number, z: number): number {
+  const x0 = Math.floor(x);
+  const z0 = Math.floor(z);
+  const fx = x - x0;
+  const fz = z - z0;
+  const h00 = carve(x0, z0);
+  const h10 = carve(x0 + 1, z0);
+  const h01 = carve(x0, z0 + 1);
+  const h11 = carve(x0 + 1, z0 + 1);
+  return (h00 * (1 - fx) + h10 * fx) * (1 - fz) + (h01 * (1 - fx) + h11 * fx) * fz;
+}
+
+scenario('El terreno esculpido nunca asoma por las calzadas', (p, terrain, _v) => {
+  // La pista y la hierba son dos interpolaciones distintas de la misma función
+  // de altura: sin esculpir el terreno bajo el corredor, la cuerda de la
+  // hierba (paso 1 m) se cuela por encima de la cinta en valles y curvas —
+  // "la hierba asoma por la pista". Aquí se mide la garantía real: malla del
+  // terreno por debajo de la cinta en todo el corredor, y el borde bajando en
+  // pendiente suave (sin peldaño de arcén).
+  for (const r of [0, 1, 2]) {
     p.set('roughness', r);
-    let minClear = Infinity;
+    const carve = makeTrackCarve(terrain);
+    let minGap = Infinity;
+    let maxLipNormal = 0;
+    let maxLipWhoops = 0;
     for (const id of TRACK_ORDER) {
-      const handle = buildTrack(TRACKS[id], terrain);
-      const road = handle.group.children[0] as THREE.Mesh;
-      const attr = road.geometry.getAttribute('position') as THREE.BufferAttribute;
-      for (let i = 0; i < attr.count; i++) {
-        const x = attr.getX(i);
-        const z = attr.getZ(i);
-        minClear = Math.min(minClear, attr.getY(i) - terrain.heightAt(x, z));
+      const def = TRACKS[id];
+      const hw = def.width / 2;
+      const center = trackCenterline(def, Math.round(trackLength(def) / 2));
+      const n = center.length;
+      for (let i = 0; i < n; i += 2) {
+        const c = center[i];
+        const nx = center[(i + 1) % n];
+        const px = center[(i - 1 + n) % n];
+        const tx = nx.x - px.x;
+        const tz = nx.z - px.z;
+        const len = Math.hypot(tx, tz) || 1;
+        const sx = -tz / len;
+        const sz = tx / len;
+        for (const frac of [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1]) {
+          const o = frac * hw;
+          const x = c.x + sx * o;
+          const z = c.z + sz * o;
+          const road = carve.roadHeight(x, z);
+          if (road === null) continue;
+          const gap = road - meshSurfaceAt(carve, x, z);
+          minGap = Math.min(minGap, gap);
+          if (Math.abs(frac) > 0.9) {
+            // Franja de badenes (coherente con terrain.ts): donde el terreno
+            // ondula a propósito el hombro no se percibe.
+            const inWhoops = Math.abs(z + 16) < 10 && Math.abs(x) < 55;
+            if (inWhoops) maxLipWhoops = Math.max(maxLipWhoops, gap);
+            else maxLipNormal = Math.max(maxLipNormal, gap);
+          }
+        }
       }
-      handle.group.children.slice().forEach((c) => {
-        const m = c as THREE.Mesh;
-        (m.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
-      });
     }
-    check(`rugosidad ${r}: la calzada vuela sobre el terreno`, minClear > 0.02,
-      `holgura mín ${(minClear * 1000).toFixed(0)} mm`);
+    check(`rugosidad ${r}: la hierba no asoma por la pista`, minGap > 0.003,
+      `holgura mín ${(minGap * 1000).toFixed(1)} mm`);
+    // El borde debe bajar en pendiente, no en peldaño: en llano la holgura es
+    // la mínima (2 cm) y crece con la curvatura local (la cuerda de la malla
+    // se levanta sobre la cinta en los valles). En la franja de badenes la
+    // ondulación del terreno de tierra la absorbe.
+    check(`rugosidad ${r}: el borde baja en pendiente en terreno normal`, maxLipNormal < 0.03 + 0.085 * r,
+      `salto máx ${(maxLipNormal * 1000).toFixed(0)} mm (<${((0.03 + 0.085 * r) * 1000).toFixed(0)} mm)`);
+    check(`rugosidad ${r}: en badenes el hombro se absorbe en la ondulación`, maxLipWhoops < 0.03 + 0.11 * r,
+      `salto máx ${(maxLipWhoops * 1000).toFixed(0)} mm (<${((0.03 + 0.11 * r) * 1000).toFixed(0)} mm)`);
   }
   p.set('roughness', 1);
 });
@@ -555,6 +612,13 @@ scenario('La cámara de persecución no mete tirones a 25 m/s', (_p, _t, _v) => 
     quaternion: new THREE.Quaternion(),
     velocity: new THREE.Vector3(0, 0, 25),
     hoodY: 0.9,
+    // API de pose interpolada (física a paso fijo → dibujo a dt de frame)
+    renderPosition(_alpha: number, out: THREE.Vector3) {
+      return out.copy(this.position);
+    },
+    renderQuaternion(_alpha: number, out: THREE.Quaternion) {
+      return out.copy(this.quaternion);
+    },
   };
   const internals = rig as unknown as { smoothPos: THREE.Vector3 };
   const dt = 1 / 60;
@@ -582,6 +646,99 @@ scenario('La cámara de persecución no mete tirones a 25 m/s', (_p, _t, _v) => 
   check('a 90 km/h no hay saltos por fotograma', maxJump < 0.8, `${(maxJump * 100).toFixed(0)} cm/fotograma`);
   check('la distancia converge al tope del 5 %', sep <= rig.distance * 1.05 + 0.05,
     `sep=${sep.toFixed(2)} m, tope=${(rig.distance * 1.05).toFixed(2)} m`);
+});
+
+// ------------------------- 5e-bis. el render interpolado no tiembla
+scenario('El render interpolado no tiembla con fotogramas irregulares a 25 m/s', (_p, _t, v) => {
+  // La física corre a paso fijo (1/300 s) y el dibujo a dt de frame: sin
+  // interpolar entre subpasos, el render muestrea la fase del acumulador y el
+  // coche da vaivenes de varios cm por fotograma (proporcional a la
+  // velocidad), que es la "vibración a alta velocidad". Con la interpolación
+  // el movimiento es uniforme salvo ruido físico.
+  let throttle = 0;
+  for (let i = 0; i < 300 * 30 && v.velocity.z < 25; i++) {
+    throttle = Math.max(0, Math.min(1, throttle + (25 - v.velocity.z) * 0.02));
+    v.step(DT, { ...NO_INPUT, throttle });
+  }
+  const frameTimes = [1 / 60, 1.07 / 60, 0.91 / 60, 1 / 60, 1.11 / 60, 0.94 / 60];
+  let acc = 0;
+  let fi = 0;
+  let t = 0;
+  const zs: number[] = [];
+  const raws: number[] = [];
+  const vzs: number[] = [];
+  const ts: number[] = [];
+  const pos = new THREE.Vector3();
+  for (let frame = 0; frame < 240; frame++) {
+    const frameDt = frameTimes[fi++ % frameTimes.length];
+    t += frameDt;
+    acc += frameDt;
+    while (acc >= DT) {
+      acc -= DT;
+      throttle = Math.max(0, Math.min(1, throttle + (25 - v.velocity.z) * 0.02));
+      v.step(DT, { ...NO_INPUT, throttle });
+    }
+    v.renderPosition(acc / DT, pos);
+    zs.push(pos.z);
+    raws.push(v.position.z);
+    vzs.push(v.velocity.z);
+    ts.push(t);
+  }
+  let maxJit = 0;
+  let maxRaw = 0;
+  for (let i = 1; i < zs.length; i++) {
+    const dtf = ts[i] - ts[i - 1];
+    const vAvg = (vzs[i] + vzs[i - 1]) / 2;
+    maxJit = Math.max(maxJit, Math.abs(zs[i] - zs[i - 1] - vAvg * dtf));
+    maxRaw = Math.max(maxRaw, Math.abs(raws[i] - raws[i - 1] - vAvg * dtf));
+  }
+  check('valores finitos', isFiniteVehicle(v));
+  check('el coche avanza a la velocidad de crucero', v.velocity.z > 20,
+    `${v.velocity.z.toFixed(1)} m/s`);
+  check('la pose interpolada es uniforme (<0,5 mm/fotograma)', maxJit < 0.0005,
+    `${(maxJit * 1000).toFixed(3)} mm`);
+  check('sin interpolar sí temblaba (la prueba mide lo que importa)', maxRaw > 0.01,
+    `${(maxRaw * 1000).toFixed(1)} mm/fotograma`);
+});
+
+// ------------------------- 5e-ter. sin ringing del giro de rueda
+scenario('Sin ringing del giro de rueda al rodar con freno motor', (p, _t, v) => {
+  // Subir a 8 m/s y dejar rodar hasta casi pararse. Con κ instantánea (vRef
+  // clampeado a 1,2 m/s) el integrador explícito del giro entraba en ciclo
+  // límite: ringing de 120-150 Hz por debajo de 2 m/s con |κ| ~ 0,03 y
+  // aceleraciones alternas de más de 1 g. Ahora la κ va amortiguada.
+  // Terreno plano: aquí se mide el modo numérico, no la excitación del terreno.
+  p.set('roughness', 0);
+  let throttle = 0;
+  for (let i = 0; i < 300 * 20 && v.velocity.z < 7.8; i++) {
+    throttle = Math.max(0, Math.min(1, throttle + (8 - v.velocity.z) * 0.02));
+    v.step(DT, { ...NO_INPUT, throttle });
+  }
+  run(v, 1, NO_INPUT); // transitorio de soltar el gas fuera de la medición
+  let peakKappa = 0;
+  let peakSlipV = 0;
+  let maxDeltaV = 0;
+  let prevVz = v.velocity.z;
+  for (let i = 0; i < 300 * 30 && v.velocity.z > 0.3; i++) {
+    v.step(DT, NO_INPUT);
+    for (const st of v.cornerStates) {
+      peakKappa = Math.max(peakKappa, Math.abs(st.kappa));
+      // solo la banda baja: a más velocidad el freno motor genera un
+      // deslizamiento negativo pequeño y físico (κ ~ 0,02).
+      if (v.velocity.z < 3) {
+        peakSlipV = Math.max(peakSlipV, Math.abs(st.wheelOmega * v.wheelRadius - v.velocity.z));
+      }
+    }
+    maxDeltaV = Math.max(maxDeltaV, Math.abs(v.velocity.z - prevVz));
+    prevVz = v.velocity.z;
+  }
+  check('valores finitos', isFiniteVehicle(v));
+  check('ha rodado hasta casi pararse', v.velocity.z < 0.6, `${v.velocity.z.toFixed(2)} m/s`);
+  check('κ sin ciclo límite', peakKappa < 0.02, `|κ| pico ${peakKappa.toFixed(4)}`);
+  check('deslizamiento acotado a baja velocidad', peakSlipV < 0.02,
+    `|ωR − v| pico ${peakSlipV.toFixed(4)} m/s`);
+  check('sin tirones de velocidad por paso', maxDeltaV < 0.004,
+    `|Δv| pico ${maxDeltaV.toFixed(4)} m/s`);
 });
 
 // --------------------------------------- 5f. el todoterreno también funciona

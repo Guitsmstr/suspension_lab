@@ -68,8 +68,12 @@ export class Terrain implements TerrainSampler {
     return out.set(hL - hR, 2 * e, hD - hU).normalize();
   }
 
-  /** Construye la malla del terreno con colores por vértice. */
-  buildMesh(size = 320, segments = 320): THREE.Mesh {
+  /** Construye la malla del terreno con colores por vértice.
+   *
+   * `heightFn` permite esculpir la malla (ver `makeTrackCarve` en track.ts):
+   * por defecto se usa la altura analítica exacta, la misma que la física.
+   */
+  buildMesh(size = 320, segments = 320, heightFn: (x: number, z: number) => number = (x, z) => this.heightAt(x, z)): THREE.Mesh {
     const geo = new THREE.PlaneGeometry(size, size, segments, segments);
     geo.rotateX(-Math.PI / 2);
 
@@ -81,9 +85,11 @@ export class Terrain implements TerrainSampler {
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      const y = this.heightAt(x, z);
+      const y = heightFn(x, z);
       pos.setY(i, y);
 
+      // La normal es la del terreno analítico: el esculpido son centímetros
+      // sobre metros y no cambia la luz (y ahorra evaluar la altura 4 veces).
       this.normalAt(x, z, normal);
       const steep = 1 - Math.max(0, normal.y);
 

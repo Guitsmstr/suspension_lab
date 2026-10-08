@@ -40,9 +40,11 @@ const BY = Math.tan(Math.PI / (2 * CY)) / ALPHA_PEAK;
 export interface TireForces {
   fx: number;
   fy: number;
+  /** Pendiente ∂Fx/∂κ [N] en el punto actual (para el giro semi-implícito). */
+  slopeFx?: number;
 }
 
-const EMPTY: TireForces = { fx: 0, fy: 0 };
+const EMPTY: TireForces = { fx: 0, fy: 0, slopeFx: 0 };
 
 /**
  * @param fz    carga vertical en el neumático [N], >= 0
@@ -65,6 +67,7 @@ export function tireForces(
   if (fz <= 0) {
     out.fx = 0;
     out.fy = 0;
+    out.slopeFx = 0;
     return out;
   }
 
@@ -76,7 +79,8 @@ export function tireForces(
   const D = cfg.mu * fz * loadFactor;
 
   // Fuerza de cada eje con su propia curva de Pacejka
-  const fx0 = D * Math.sin(CX * Math.atan(BX * kappa));
+  const bx = BX * kappa;
+  const fx0 = D * Math.sin(CX * Math.atan(bx));
   // El camber genera empuje lateral hacia donde se inclina la rueda; entra en
   // la combinación como demanda lateral más (satura con el resto).
   const fySlip = -D * Math.sin(CY * Math.atan(BY * alpha));
@@ -89,6 +93,10 @@ export function tireForces(
 
   out.fx = fx0 * scale;
   out.fy = fy0 * scale;
+  // ∂Fx0/∂κ = D·Cx·Bx·cos(Cx·atan(Bx·κ)) / (1 + (Bx·κ)²); con la elipse, la
+  // pendiente efectiva se recorta en la misma proporción (aprox. suficiente:
+  // solo se usa para estabilizar la integración del giro de rueda).
+  out.slopeFx = ((D * CX * BX * Math.cos(CX * Math.atan(bx))) / (1 + bx * bx)) * scale;
   return out;
 }
 

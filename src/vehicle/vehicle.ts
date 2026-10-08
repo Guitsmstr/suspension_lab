@@ -85,6 +85,16 @@ const ROLLING_RESISTANCE = 0.014;
 /** Por debajo de esta velocidad del punto de contacto la goma no patina:
  * la rueda queda ligada a la rodadura (fricción estática) [m/s]. */
 const STATIC_LOCK_SPEED = 0.5;
+/**
+ * Piso de frecuencia [1/s] del filtro de deslizamiento (relajación del
+ * neumático). El modelo de longitud de relajación (σ/v) tiende a τ→∞ al bajar
+ * la velocidad: por debajo de ~10 m/s la κ instantánea (vRef clampeado a 1,2)
+ * deja una constante de tiempo de ~0,3 ms frente al paso de 3,3 ms y el
+ * integrador entra en ciclo límite (ringing de 120-150 Hz al rodar con freno
+ * motor por debajo de 2 m/s). El piso deja la respuesta cuasi-estática
+ * (τ ≈ 33 ms, imperceptible al volante) y amortigua el modo numérico.
+ */
+const SLIP_RATE_MIN = 30;
 const MAX_BRAKE_TORQUE = 6400; // N·m totales
 /** Velocidad máxima marcha atrás [m/s] (~30 km/h, como una reversa real). */
 const MAX_REVERSE_SPEED = 8.5;
@@ -190,6 +200,19 @@ export interface CornerState {
   arbForce: number;
 }
 
+/**
+ * Estado de esquina interpolado para el render (solo lectura): la física corre
+ * a paso fijo y el dibujo a dt de frame, así que el visual se interpola entre
+ * el penúltimo y el último subpaso (ver `Vehicle.renderCorner`).
+ */
+export interface RenderCornerState {
+  s: number;
+  steer: number;
+  camber: number;
+  tireDeflection: number;
+  wheelOmega: number;
+}
+
 export interface WheelTelemetry {
   travel: number; // mm, compresión relativa al estático
   travelVel: number; // m/s
@@ -252,6 +275,17 @@ export class Vehicle {
   resetCount = 0;
   /** Marcha atrás engranada (selector en R). La pone/quita la lógica de pedales. */
   reversing = false;
+
+  // --- estado previo para interpolar el render (paso fijo → dibujo a dt) ---
+  private readonly prevPosition = new THREE.Vector3();
+  private readonly prevQuaternion = new THREE.Quaternion();
+  private readonly prevCorners: RenderCornerState[] = [0, 1, 2, 3].map(() => ({
+    s: 0,
+    steer: 0,
+    camber: 0,
+    tireDeflection: 0,
+    wheelOmega: 0,
+  }));
 
   private readonly drivetrain = new Drivetrain();
   /** Config por rueda (sin asignaciones en el bucle): cada una lleva su μ de superficie. */
@@ -471,6 +505,7 @@ export class Vehicle {
       this.corners[i].vAttachPrev.set(0, 0, 0);
     }
     this.updateTelemetry();
+    this.snapshotRender(); // teletransporte: el render no interpola el salto
   }
 
   /** Ajusta la posición (y rumbo) de aparición. `yaw` en radianes, 0 = +Z. */
@@ -480,10 +515,58 @@ export class Vehicle {
     this.reset();
   }
 
+  /**
+   * Copia el estado visible al previo. Se llama al empezar cada subpaso y en
+   * los teletransportes (`reset`): el render interpola entre ambos.
+   */
+  private snapshotRender(): void {
+    this.prevPosition.copy(this.position);
+    this.prevQuaternion.copy(this.quaternion);
+    for (let i = 0; i < this.prevCorners.length; i++) {
+      const st = this.cornerStates[i];
+      const pv = this.prevCorners[i];
+      pv.s = st.s;
+      pv.steer = st.steer;
+      pv.camber = st.camber;
+      pv.tireDeflection = st.tireDeflection;
+      pv.wheelOmega = st.wheelOmega;
+    }
+  }
+
+  /**
+   * Posición del cuerpo para dibujar, interpolada entre el penúltimo y el
+   * último subpaso: la física corre a paso fijo (1/300 s) y el dibujo a dt de
+   * frame, y sin interpolar, el render muestrea la fase del acumulador — el
+   * coche "tiembla" varios cm por fotograma a alta velocidad (proporcional a
+   * la velocidad · 1 paso). `alpha` = acumulador/dt ∈ [0, 1) en el frame.
+   */
+  renderPosition(alpha: number, out: THREE.Vector3): THREE.Vector3 {
+    return out.copy(this.prevPosition).lerp(this.position, alpha);
+  }
+
+  /** Orientación interpolada (ver `renderPosition`). */
+  renderQuaternion(alpha: number, out: THREE.Quaternion): THREE.Quaternion {
+    return out.copy(this.prevQuaternion).slerp(this.quaternion, alpha);
+  }
+
+  /** Estado visual de la esquina `i` interpolado (ver `renderPosition`). */
+  renderCorner(i: number, alpha: number, out: RenderCornerState): RenderCornerState {
+    const pv = this.prevCorners[i];
+    const st = this.cornerStates[i];
+    out.s = pv.s + (st.s - pv.s) * alpha;
+    out.steer = pv.steer + (st.steer - pv.steer) * alpha;
+    out.camber = pv.camber + (st.camber - pv.camber) * alpha;
+    out.tireDeflection = pv.tireDeflection + (st.tireDeflection - pv.tireDeflection) * alpha;
+    out.wheelOmega = pv.wheelOmega + (st.wheelOmega - pv.wheelOmega) * alpha;
+    return out;
+  }
+
   /** Avanza la simulación un paso fijo dt (segundos). */
   step(dt: number, input: { throttle: number; brake: number; steer: number; handbrake: boolean }): void {
     const P = this.params.values;
     const q = this.quaternion;
+
+    this.snapshotRender();
 
     this.omegaWorld.copy(this.omega).applyQuaternion(q);
     this.upWorld.copy(UP).applyQuaternion(q);
@@ -716,15 +799,11 @@ export class Vehicle {
       const alphaTarget = Math.atan2(vLat, vRef);
 
       const speed2d = Math.hypot(vLong, vLat);
-      if (speed2d < 2) {
-        st.kappa = kappaTarget;
-        st.alpha = alphaTarget;
-      } else {
-        // longitud de relajación: el neumático necesita distancia para generar fuerza
-        const rate = Math.min(1, (speed2d / 0.35) * dt);
-        st.kappa += (kappaTarget - st.kappa) * rate;
-        st.alpha += (alphaTarget - st.alpha) * rate;
-      }
+      // Relajación del neumático: necesita distancia para generar fuerza (ver
+      // `SLIP_RATE_MIN` para el piso de frecuencia a baja velocidad).
+      const slipRate = Math.min(1, Math.max(speed2d / 0.35, SLIP_RATE_MIN) * dt);
+      st.kappa += (kappaTarget - st.kappa) * slipRate;
+      st.alpha += (alphaTarget - st.alpha) * slipRate;
 
       // --- fuerzas del neumático ---
       const f = tireForces(
@@ -749,7 +828,18 @@ export class Vehicle {
       const fy = f.fy;
 
       // --- giro de la rueda ---
-      st.wheelOmega += ((this.driveTorques[i] - fx * this.wheelRadius) / c.wheelInertia) * dt;
+      // Semi-implícito en la rigidez longitudinal del neumático: la constante
+      // de tiempo de ∂Fx/∂ω (~0,3 ms con vRef acotado a 1,2) queda muy por
+      // debajo del paso (3,3 ms) y el Euler explícito entraba en ciclo límite:
+      // ringing de 20-140 Hz al soltar el gas entre 0,5 y 6 m/s. Se integra
+      // implícito el término rígido dividiendo el incremento por su
+      // denominador: mismo punto fijo (par = Fx·R) y misma física resuelta,
+      // solo desaparece el modo numérico. La sensibilidad efectiva de κ a ω
+      // atraviesa el filtro de relajación (slipRate).
+      const slopeOmega = (f.slopeFx ?? 0) * (this.wheelRadius / vRef) * slipRate;
+      const denom = 1 + (dt * slopeOmega * this.wheelRadius) / c.wheelInertia;
+      st.wheelOmega +=
+        ((this.driveTorques[i] - fx * this.wheelRadius) / c.wheelInertia) * dt / denom;
       const engBrake = this.engineBrakeTorques[i];
       if (engBrake < 0 && Math.abs(st.wheelOmega) > 1e-3) {
         // Freno motor: se opone al giro sin invertirlo (como los frenos).
