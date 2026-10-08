@@ -486,6 +486,9 @@ async function boot(): Promise<void> {
         }
       } catch (err) {
         running = false;
+        // Mismo caso de "sonido congelado": si el bucle muere, el audio se
+        // quedaría con las últimas ganancias. Silencio total.
+        audio.setMuted(true);
         const { message, stack } = errorMessage(err);
         loader.fail(`Error en el bucle de simulación: ${message}`, stack);
       }

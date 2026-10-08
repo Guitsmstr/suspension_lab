@@ -48,6 +48,9 @@ const ENGINE_BY_CAR: Record<CarId, LoopName> = {
   kwid: 'engine_kwid_loop',
 };
 
+/** Todos los bucles de motor: solo suena el del coche activo. */
+const ENGINE_LOOPS: LoopName[] = ['engine_offroad_loop', 'engine_kwid_loop', 'engine_ev_loop'];
+
 const ALL_LOOPS: LoopName[] = [
   'engine_offroad_loop', 'engine_kwid_loop', 'engine_ev_loop',
   'roll_asphalt_loop', 'roll_dirt_loop', 'roll_grass_loop',
@@ -161,7 +164,13 @@ export class GameAudio {
   }
 
   setCar(id: CarId): void {
+    if (id === this.carId) return;
     this.carId = id;
+    // Los bucles de motor de los demás coches se apagan YA: no deben quedar
+    // congelados con la última ganancia que tuvieron (se superponían).
+    for (const name of ENGINE_LOOPS) {
+      if (name !== ENGINE_BY_CAR[id]) this.setLoop(name, 0, this.loops.get(name)?.rate ?? 1);
+    }
   }
 
   setMuted(muted: boolean): void {
@@ -223,10 +232,15 @@ export class GameAudio {
     const paused = opts.paused;
 
     // ---- Motor: tono por rpm (buclado por encendido) + carga ----
+    // Solo el bucle del coche activo recibe ganancia; los otros dos se escriben
+    // a 0 cada frame (si no, conservan la última ganancia y se superponen).
     const rpmN = clamp((t.rpm - 900) / (6800 - 900), -0.1, 1.15);
     const rate = 0.55 + 1.75 * Math.max(0, rpmN);
     const engineTarget = paused ? 0 : MIX.engine * (0.42 + 0.58 * smoothstep(-0.1, 0.55, rpmN));
-    this.setLoop(ENGINE_BY_CAR[this.carId], engineTarget, rate);
+    const activeEngine = ENGINE_BY_CAR[this.carId];
+    for (const name of ENGINE_LOOPS) {
+      this.setLoop(name, name === activeEngine ? engineTarget : 0, rate);
+    }
 
     // ---- Rodadura: superficie cruzada + volumen por velocidad ----
     const surface = t.surface;
