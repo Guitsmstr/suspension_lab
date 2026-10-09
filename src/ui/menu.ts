@@ -12,6 +12,7 @@ export interface MenuActions {
   onSelectTrack: (id: TrackId) => void;
   onSelectCamera: (mode: CameraMode) => void;
   onClose: () => void;
+  onVolume: (v: number) => void;
 }
 
 const CAMERA_OPTIONS: Array<{ mode: CameraMode; label: string; hint: string }> = [
@@ -25,6 +26,8 @@ export class Menu {
   private readonly carCards = new Map<CarId, HTMLElement>();
   private readonly trackCards = new Map<TrackId, HTMLElement>();
   private readonly camBtns = new Map<CameraMode, HTMLElement>();
+  private volInput: HTMLInputElement | null = null;
+  private volVal: HTMLElement | null = null;
 
   constructor(private readonly actions: MenuActions) {
     const root = document.getElementById('menu');
@@ -82,6 +85,21 @@ export class Menu {
     root.addEventListener('click', (e) => {
       if (e.target === root) this.actions.onClose();
     });
+
+    this.volInput = root.querySelector<HTMLInputElement>('#menu-vol');
+    this.volVal = root.querySelector<HTMLElement>('#menu-vol-val');
+    this.volInput?.addEventListener('input', () => {
+      const v = Number(this.volInput?.value ?? 80) / 100;
+      this.actions.onVolume(v);
+      if (this.volVal) this.volVal.textContent = `${this.volInput?.value ?? 80}%`;
+    });
+  }
+
+  /** Sincroniza el slider con el volumen real (p. ej. restaurado). */
+  setVolume(v: number): void {
+    const pct = Math.round(v * 100);
+    if (this.volInput) this.volInput.value = String(pct);
+    if (this.volVal) this.volVal.textContent = `${pct}%`;
   }
 
   get open(): boolean {

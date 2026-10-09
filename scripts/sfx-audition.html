@@ -22,22 +22,58 @@
 </head>
 <body>
   <h1>Audición de SFX — Suspension Lab</h1>
-  <p class="sub">Generado por <code>scripts/gen-sounds.mjs</code>. En los bucles, el control "rate" simula el escalado por rpm/velocidad que hará el juego.</p>
+  <p class="sub">Grabaciones reales (<code>scripts/fetch-sfx.mjs</code>) + <code>ui_*</code>, <code>countdown_*</code> y <code>engine_ev_loop</code> procedurales. En los bucles, el control "rate" simula el pitch que aplica el juego. <button id="stop-all">■ detener todo</button></p>
   <div id="app"></div>
   <script src="../public/sfx/manifest.js"></script>
+  <script src="../sfx-candidates/candidates.js"></script>
   <script>
     const GROUPS = [
-      ['motor', 'Motor (bucles escalables por rpm · f0 = 100 Hz)'],
-      ['rodadura', 'Rodadura por superficie (escalar volumen con velocidad)'],
-      ['neumático', 'Neumáticos (escalar con slip / frenado)'],
+      ['motor', 'Motor (bucles escalables por rpm)'],
+      ['rodadura', 'Rodadura por superficie (volumen con velocidad)'],
+      ['neumático', 'Neumáticos (derrape con slip · frenada con pedal)'],
       ['suspensión', 'Suspensión y chasis'],
       ['chasis', 'Raspado de bajos'],
-      ['impacto', 'Impactos'],
+      ['impacto', 'Impactos (light &lt; heavy &lt; extreme)'],
       ['ambiente', 'Ambiente'],
       ['ui', 'UI y carrera'],
     ];
-    const manifest = window.SFX_MANIFEST;
     const app = document.getElementById('app');
+    const players = [];
+    document.getElementById('stop-all').addEventListener('click', () => {
+      for (const a of players) a.pause();
+      for (const b of app.querySelectorAll('button')) if (b.id !== 'stop-all') b.textContent = '▶ play';
+    });
+    // --- Cata de candidatos (no están en el juego) ---
+    // Compara con `tire_squeal_loop` de la lista de abajo (es el actual).
+    const cands = window.SFX_CANDIDATES ?? [];
+    if (cands.length) {
+      const h = document.createElement('h2');
+      h.textContent = '★ Cata: candidatos a derrape (fuera del juego)';
+      app.appendChild(h);
+      for (const m of cands) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `
+          <button class="loop">▶ play</button>
+          <span class="name">${m.name}<br><small style="color:#5c6773">${m.credit} · ${m.license} · <a href="${m.page}" target="_blank" rel="noopener">fuente</a></small></span>
+          <label>rate <input type="range" min="0.4" max="2" step="0.01" value="1"></label>
+          <span class="desc">${m.desc} — normalizados al mismo pico para comparar justo.</span>`;
+        const audio = new Audio(`../sfx-candidates/${m.name}`);
+        audio.loop = true;
+        audio.volume = 0.8;
+        players.push(audio);
+        const btn = row.querySelector('button');
+        const rate = row.querySelector('input');
+        rate.addEventListener('input', () => { audio.playbackRate = parseFloat(rate.value); });
+        btn.addEventListener('click', () => {
+          if (!audio.paused) { audio.pause(); btn.textContent = '▶ play'; return; }
+          audio.play();
+          btn.textContent = '■ stop';
+        });
+        app.appendChild(row);
+      }
+    }
+    const manifest = window.SFX_MANIFEST;
     for (const [group, title] of GROUPS) {
       const items = manifest.filter(m => m.group === group);
       if (!items.length) continue;
@@ -50,10 +86,11 @@
         const isLoop = m.kind === 'loop';
         row.innerHTML = `
           <button class="${isLoop ? 'loop' : ''}">▶ play</button>
-          <span class="name">${m.name}</span>
+          <span class="name">${m.name}<br><small style="color:#5c6773">${m.credit ?? 'procedural'} · ${m.license ?? '—'}</small></span>
           ${isLoop ? `<label>rate <input type="range" min="0.4" max="3" step="0.01" value="1"></label>` : ''}
           <span class="desc">${m.desc}</span>`;
         const audio = new Audio(`../public/sfx/${m.name}`);
+        players.push(audio);
         audio.loop = isLoop;
         audio.volume = Math.min(1, (m.gain ?? 0.7) * 1.1);
         const btn = row.querySelector('button');

@@ -305,7 +305,9 @@ async function boot(): Promise<void> {
       onSelectTrack: (id) => applyTrack(id),
       onSelectCamera: (mode) => applyCamera(mode),
       onClose: () => menu.hide(),
+      onVolume: (v) => audio.setVolume(v),
     });
+    menu.setVolume(audio.getVolume());
     document.getElementById('menu-fab')?.addEventListener('click', () => {
       menu.show();
       menu.refresh(carId, trackId, cameraRig.mode);

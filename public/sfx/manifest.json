@@ -5,7 +5,11 @@
     "group": "motor",
     "desc": "Motor V8 ronco (todoterreno 4x4). Ritmo de encendido base 60 Hz, escalar con playbackRate.",
     "gain": 0.55,
-    "baseFreq": 60
+    "baseFreq": 60,
+    "src": "https://freesound.org/people/Mihacappy/sounds/840649/",
+    "credit": "Mihacappy — \"djeep_idle.wav\" (Diesel Jeep)",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "engine_kwid_loop.wav",
@@ -13,127 +17,176 @@
     "group": "motor",
     "desc": "Motor de 3 cilindros ligero (Kwid). Ritmo de encendido base 60 Hz, escalar con playbackRate.",
     "gain": 0.5,
-    "baseFreq": 60
-  },
-  {
-    "name": "engine_ev_loop.wav",
-    "kind": "loop",
-    "group": "motor",
-    "desc": "Zumbido eléctrico + whine de engranaje/inversor (Tesla). Escalar con playbackRate.",
-    "gain": 0.5,
-    "baseFreq": 100
+    "baseFreq": 60,
+    "src": "https://freesound.org/people/seth-m/sounds/269771/",
+    "credit": "seth-m — \"car idle\" (Mini Cooper 2002)",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "roll_asphalt_loop.wav",
     "kind": "loop",
     "group": "rodadura",
     "desc": "Rodadura continua sobre asfalto (lecho grave + granos finos). Escalar volumen con velocidad.",
-    "gain": 0.45
+    "gain": 0.45,
+    "src": "https://freesound.org/people/klankbeeld/sounds/612011/",
+    "credit": "klankbeeld — \"inside car 90 km asphalt\"",
+    "license": "CC-BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/"
   },
   {
     "name": "roll_dirt_loop.wav",
     "kind": "loop",
     "group": "rodadura",
     "desc": "Rodadura sobre tierra con gravilla granular. Escalar volumen con velocidad.",
-    "gain": 0.5
+    "gain": 0.5,
+    "src": "https://freesound.org/people/seth-m/sounds/341069/",
+    "credit": "seth-m — \"gravel road\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "roll_grass_loop.wav",
     "kind": "loop",
     "group": "rodadura",
     "desc": "Rodadura sobre hierba (lecho suave + swish). Escalar volumen con velocidad.",
-    "gain": 0.5
+    "gain": 0.5,
+    "src": "https://freesound.org/people/felix.blume/sounds/146436/",
+    "credit": "felix.blume — \"Dry grass rustling in the wind (desert of Chile)\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "tire_squeal_loop.wav",
     "kind": "loop",
     "group": "neumático",
-    "desc": "Chirrido de neumático en límite de adherencia (rugido + tonos stick-slip). Escalar con slip.",
-    "gain": 0.5
-  },
-  {
-    "name": "brake_squeal_loop.wav",
-    "kind": "loop",
-    "group": "neumático",
-    "desc": "Chirrido de frenado/bloqueo de ruedas (más agudo y estable).",
-    "gain": 0.5
+    "desc": "Chirrido de neumático en límite de adherencia. Escalar con slip.",
+    "gain": 0.5,
+    "src": "https://opengameart.org/content/car-tire-squeal-skid-loop",
+    "credit": "Tom Haigh / audible-edge (vía qubodup) — \"tires_squal_loop\"",
+    "license": "CC-BY 3.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/3.0/"
   },
   {
     "name": "wheelspin_loop.wav",
     "kind": "loop",
     "group": "neumático",
     "desc": "Patinaje de ruedas en vacío / derrape fuerte.",
-    "gain": 0.5
+    "gain": 0.5,
+    "src": "https://freesound.org/people/audible-edge/sounds/71737/",
+    "credit": "audible-edge — \"Chrysler LHS tire squeal 02\" (sección aceleración)",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "scrape_loop.wav",
     "kind": "loop",
     "group": "chasis",
     "desc": "Raspado continuo de bajos contra el suelo (granos metálicos).",
-    "gain": 0.45
+    "gain": 0.45,
+    "src": "https://freesound.org/people/BehanSean/sounds/422437/",
+    "credit": "BehanSean — \"metal scrape 2\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "wind_loop.wav",
     "kind": "loop",
     "group": "ambiente",
     "desc": "Viento / aire a velocidad. Escalar con velocidad y cámara.",
-    "gain": 0.3
+    "gain": 0.3,
+    "src": "https://opengameart.org/content/wind-whoosh-loop",
+    "credit": "SketchMan3 — \"wind woosh loop\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "susp_bottomout.wav",
     "kind": "oneshot",
     "group": "suspensión",
     "desc": "Golpe seco de tope de suspensión (bottom-out).",
-    "gain": 0.85
+    "gain": 0.85,
+    "src": "https://freesound.org/people/qubodup/sounds/332058/",
+    "credit": "qubodup — \"Collision\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "susp_bottomout_heavy.wav",
     "kind": "oneshot",
     "group": "suspensión",
     "desc": "Golpe de tope fuerte (gran compresión / aterrizaje duro).",
-    "gain": 0.9
+    "gain": 0.9,
+    "src": "https://freesound.org/people/qubodup/sounds/332056/",
+    "credit": "qubodup — \"Fast Collision\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "susp_clunk.wav",
     "kind": "oneshot",
     "group": "suspensión",
     "desc": "Clunk de extensión/rebote de suspensión.",
-    "gain": 0.75
+    "gain": 0.75,
+    "src": "https://freesound.org/people/StarTowerStudio/sounds/424983/",
+    "credit": "StarTowerStudio — \"mixing_bowl_clunk\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "land_thump.wav",
     "kind": "oneshot",
     "group": "suspensión",
     "desc": "Aterrizaje de salto (impacto amortiguado + muelle + gravilla).",
-    "gain": 0.9
+    "gain": 0.9,
+    "src": "https://freesound.org/people/qubodup/sounds/332057/",
+    "credit": "qubodup — \"Fast Collision Reverb\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "whoops_rumble.wav",
     "kind": "oneshot",
     "group": "suspensión",
     "desc": "Ráfaga de badenes (rumble de baja frecuencia granulado).",
-    "gain": 0.8
+    "gain": 0.8,
+    "src": "https://freesound.org/people/el_boss/sounds/630030/",
+    "credit": "el_boss — \"Deep Bass Thump\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "impact_light.wav",
     "kind": "oneshot",
     "group": "impacto",
     "desc": "Impacto ligero (chasis contra obstáculo, roce de borde).",
-    "gain": 0.8
+    "gain": 0.8,
+    "src": "https://freesound.org/people/Bird_man/sounds/275160/",
+    "credit": "Bird_man — \"Thud\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "impact_heavy.wav",
     "kind": "oneshot",
     "group": "impacto",
     "desc": "Impacto fuerte (colisión de alta energía).",
-    "gain": 0.95
+    "gain": 0.95,
+    "src": "https://freesound.org/people/toddcircle/sounds/442344/",
+    "credit": "toddcircle — \"Deep thud punch\" (mejor golpe)",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
   {
     "name": "rollover.wav",
     "kind": "oneshot",
     "group": "impacto",
-    "desc": "Vuelco (choque + modos + raspado largo con chatarra).",
-    "gain": 0.95
+    "desc": "Vuelco corto (chillido + golpe inicial).",
+    "gain": 0.95,
+    "src": "https://freesound.org/people/mokasza/sounds/810174/",
+    "credit": "mokasza — \"car crash\" (recorte inicial)",
+    "license": "CC-BY 4.0",
+    "licenseUrl": "https://creativecommons.org/licenses/by/4.0/"
   },
   {
     "name": "ui_click.wav",
@@ -155,5 +208,16 @@
     "group": "ui",
     "desc": "Bip final de salida (\"¡VAMOS!\").",
     "gain": 0.55
+  },
+  {
+    "name": "impact_extreme.wav",
+    "kind": "oneshot",
+    "group": "impacto",
+    "desc": "Golpe corto y contundente — impactos extremos.",
+    "gain": 0.95,
+    "src": "https://freesound.org/people/qubodup/sounds/332056/",
+    "credit": "qubodup — \"Fast Collision\"",
+    "license": "CC0 1.0",
+    "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   }
 ]

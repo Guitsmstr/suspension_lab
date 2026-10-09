@@ -21,6 +21,9 @@ car_tesla_model/
 .tripo/
 .tripo-work/
 .tripo-work2/
+.sfx-src/
+.sfx-backup/
+sfx-candidates/
 
 # Modelos intermedios de Blender
 *.blend

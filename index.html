@@ -245,6 +245,25 @@
         background: rgba(77, 163, 255, 0.3);
       }
 
+      .menu-vol {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted, #98a2b0);
+        white-space: nowrap;
+      }
+
+      .menu-vol input[type='range'] {
+        width: 130px;
+      }
+
+      .menu-vol span {
+        min-width: 38px;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
       /* Botón flotante para abrir el menú: encima del minimapa */
       #menu-fab {
         position: fixed;
@@ -790,6 +809,10 @@
         <div class="menu-grid-3" id="menu-cams"></div>
         <div class="menu-foot">
           <button id="btn-drive">Conducir (M)</button>
+          <label class="menu-vol" title="Volumen general">
+            Vol. <input id="menu-vol" type="range" min="0" max="100" step="1" value="80" />
+            <span id="menu-vol-val">80%</span>
+          </label>
         </div>
       </div>
     </div>

@@ -19,7 +19,6 @@ const SFX_DIR = '/sfx';
 type LoopName =
   | 'engine_offroad_loop'
   | 'engine_kwid_loop'
-  | 'engine_ev_loop'
   | 'roll_asphalt_loop'
   | 'roll_dirt_loop'
   | 'roll_grass_loop'
@@ -36,42 +35,47 @@ type OneShotName =
   | 'whoops_rumble'
   | 'impact_light'
   | 'impact_heavy'
+  | 'impact_extreme'
   | 'rollover'
   | 'ui_click'
   | 'countdown_beep'
   | 'countdown_go';
 
-/** Motor por coche (los bucles de motor tienen fundamental 60 Hz de encendido). */
-const ENGINE_BY_CAR: Record<CarId, LoopName> = {
-  sport: 'engine_ev_loop',
+/** Motor por coche. El sport es eléctrico: sin bucle de motor (null). */
+const ENGINE_BY_CAR: Record<CarId, LoopName | null> = {
+  sport: null,
   offroad: 'engine_offroad_loop',
   kwid: 'engine_kwid_loop',
 };
 
-/** Todos los bucles de motor: solo suena el del coche activo. */
-const ENGINE_LOOPS: LoopName[] = ['engine_offroad_loop', 'engine_kwid_loop', 'engine_ev_loop'];
+/** Bucles de combustión: solo suena el del coche activo (el EV va en silencio). */
+const ENGINE_LOOPS: LoopName[] = ['engine_offroad_loop', 'engine_kwid_loop'];
 
 const ALL_LOOPS: LoopName[] = [
-  'engine_offroad_loop', 'engine_kwid_loop', 'engine_ev_loop',
+  'engine_offroad_loop', 'engine_kwid_loop',
   'roll_asphalt_loop', 'roll_dirt_loop', 'roll_grass_loop',
   'tire_squeal_loop', 'wheelspin_loop', 'scrape_loop', 'wind_loop',
 ];
 
 const ALL_ONESHOTS: OneShotName[] = [
   'susp_bottomout', 'susp_bottomout_heavy', 'susp_clunk', 'land_thump', 'whoops_rumble',
-  'impact_light', 'impact_heavy', 'rollover', 'ui_click', 'countdown_beep', 'countdown_go',
+  'impact_light', 'impact_heavy', 'impact_extreme', 'rollover', 'ui_click', 'countdown_beep', 'countdown_go',
 ];
 
 /** Ganancias estáticas de mezcla (equilibrio entre capas). */
 const MIX = {
   engine: 0.55,
   roll: 0.6,
-  squeal: 0.5,
-  wheelspin: 0.45,
+  squeal: 0.35,
+  wheelspin: 0.35,
   scrape: 0.4,
   wind: 0.5,
   master: 0.9,
 };
+
+/** Volumen persistido (localStorage) para no ensordecer al recargar. */
+const VOLUME_KEY = 'sl-volume';
+const DEFAULT_VOLUME = 0.8;
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -90,6 +94,7 @@ interface LoopLayer {
 
 export class GameAudio {
   private mutedFlag = false;
+  private volume = DEFAULT_VOLUME;
   private readonly ctx: AudioContext | null;
   private readonly master: GainNode | null;
   private readonly buffers = new Map<string, AudioBuffer>();
@@ -119,6 +124,13 @@ export class GameAudio {
       this.master = this.ctx.createGain();
       this.master.gain.value = MIX.master;
       this.master.connect(this.ctx.destination);
+      try {
+        const saved = Number(globalThis.localStorage?.getItem(VOLUME_KEY));
+        if (Number.isFinite(saved)) this.volume = clamp(saved, 0, 1);
+      } catch {
+        // sin almacenamiento: volumen por defecto
+      }
+      this.applyMaster();
     } catch {
       this.ctx = null;
       this.master = null;
@@ -175,14 +187,38 @@ export class GameAudio {
 
   setMuted(muted: boolean): void {
     this.mutedFlag = muted;
-    if (this.master && this.ctx) {
-      this.master.gain.setTargetAtTime(muted ? 0 : MIX.master, this.ctx.currentTime, 0.03);
-    }
+    this.applyMaster();
   }
 
   toggleMuted(): boolean {
     this.setMuted(!this.mutedFlag);
     return this.mutedFlag;
+  }
+
+  /** Volumen maestro 0..1 (persistido). 0 equivale a silenciar. */
+  setVolume(v: number): void {
+    this.volume = clamp(v, 0, 1);
+    try {
+      globalThis.localStorage?.setItem(VOLUME_KEY, String(this.volume));
+    } catch {
+      // sin almacenamiento: solo sesión
+    }
+    this.applyMaster();
+  }
+
+  getVolume(): number {
+    return this.volume;
+  }
+
+  isMuted(): boolean {
+    return this.mutedFlag;
+  }
+
+  private applyMaster(): void {
+    if (this.master && this.ctx) {
+      const target = this.mutedFlag || this.volume <= 0 ? 0 : MIX.master * this.volume;
+      this.master.gain.setTargetAtTime(target, this.ctx.currentTime, 0.03);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -281,9 +317,19 @@ export class GameAudio {
     const k = clamp(dt * 12, 0, 1);
     this.slip += (slipScore - this.slip) * k;
 
-    const slipGain = smoothstep(0.75, 1.6, this.slip);
+    // El derrape habla antes (desde slip 0.6) y nace agudo (rate 1.3): el
+    // slip medido se satura rapidísimo, así que casi todo el rango útil es
+    // chirrido pleno. En tierra apenas insinúa y en hierba calla.
+    const slipGain = smoothstep(0.6, 1.4, this.slip);
     const speedFactor = smoothstep(2, 9, speed);
-    this.setLoop('tire_squeal_loop', paused ? 0 : MIX.squeal * slipGain * speedFactor, 0.85 + 0.4 * clamp(this.slip - 1, 0, 1));
+    // Rate casi fijo en 1.0 (como en la página de audición): el pitch por
+    // slip lo hacía sonar distinto al sample original.
+    // TODO(pendiente): ataque de derrape — one-shot al iniciar el slide por
+    // encima de este loop (el "arrancón" completo vive en sfx-candidates/c7).
+    const squealSurface = surface === 'asphalt' ? 1 : surface === 'dirt' ? 0.12 : 0;
+    this.setLoop('tire_squeal_loop', paused ? 0 : MIX.squeal * slipGain * speedFactor * squealSurface, 1 + 0.3 * clamp(this.slip - 1, 0, 1));
+    // La frenada bloqueando ya alimenta el slip (vía slipRatio): no hay capa
+    // propia de freno, el derrape cubre ambos casos.
     this.setLoop('wheelspin_loop', paused ? 0 : MIX.wheelspin * slipGain * (1 - 0.75 * speedFactor), 1);
 
     // ---- Scrape de bajos: rodado extremo ----
@@ -309,14 +355,21 @@ export class GameAudio {
         this.play('susp_clunk', clamp(0.4 + clunk, 0.4, 1), 1, 0.12);
       }
 
-      // Impactos: aceleración horizontal del chasis (Δv por frame)
+      // Impactos: aceleración horizontal del chasis (Δv por frame).
+      // Tres niveles: pow seco (normal), pow grave grande (fuerte) y choque
+      // largo estruendoso solo para lo extremo.
       const dvx = vehicle.velocity.x - this.prevVx;
       const dvz = vehicle.velocity.z - this.prevVz;
       const accel = Math.sqrt(dvx * dvx + dvz * dvz) / Math.max(dt, 1e-4);
       if (accel > 22) {
-        const heavy = accel > 55;
         const gain = clamp(0.45 + accel / 120, 0.45, 1);
-        this.play(heavy ? 'impact_heavy' : 'impact_light', gain, 0.94 + 0.12 * Math.random(), 0.16);
+        if (accel > 95) {
+          this.play('impact_extreme', gain, 0.94 + 0.12 * Math.random(), 0.6);
+        } else if (accel > 55) {
+          this.play('impact_heavy', gain, 0.78 + 0.08 * Math.random(), 0.16);
+        } else {
+          this.play('impact_light', gain, 0.96 + 0.08 * Math.random(), 0.16);
+        }
       }
 
       // Vuelco
