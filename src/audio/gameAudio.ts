@@ -23,6 +23,7 @@ type LoopName =
   | 'roll_dirt_loop'
   | 'roll_grass_loop'
   | 'tire_squeal_loop'
+  | 'brake_squeal_loop'
   | 'wheelspin_loop'
   | 'scrape_loop'
   | 'wind_loop';
@@ -54,7 +55,7 @@ const ENGINE_LOOPS: LoopName[] = ['engine_offroad_loop', 'engine_kwid_loop'];
 const ALL_LOOPS: LoopName[] = [
   'engine_offroad_loop', 'engine_kwid_loop',
   'roll_asphalt_loop', 'roll_dirt_loop', 'roll_grass_loop',
-  'tire_squeal_loop', 'wheelspin_loop', 'scrape_loop', 'wind_loop',
+  'tire_squeal_loop', 'brake_squeal_loop', 'wheelspin_loop', 'scrape_loop', 'wind_loop',
 ];
 
 const ALL_ONESHOTS: OneShotName[] = [
@@ -67,6 +68,7 @@ const MIX = {
   engine: 0.55,
   roll: 0.6,
   squeal: 0.35,
+  brake: 0.35,
   wheelspin: 0.35,
   scrape: 0.4,
   wind: 0.5,
@@ -107,7 +109,9 @@ export class GameAudio {
   private prevVz = 0;
   private prevContact = [true, true, true, true];
   private readonly cooldown = new Map<string, number>();
-  private slip = 0;
+  private latSlip = 0;
+  private lockSlip = 0;
+  private spinSlip = 0;
 
   constructor() {
     const Ctor: typeof AudioContext | undefined =
@@ -285,8 +289,12 @@ export class GameAudio {
     this.setLoop('roll_dirt_loop', rollMaster * (surface === 'dirt' ? 1 : 0.06), 0.85 + 0.35 * smoothstep(0, 30, speed));
     this.setLoop('roll_grass_loop', rollMaster * (surface === 'grass' ? 1 : 0.06), 0.85 + 0.35 * smoothstep(0, 30, speed));
 
-    // ---- Neumáticos: slip combinado de las 4 ruedas ----
-    let slipScore = 0;
+    // ---- Neumáticos: slip por eje (máximo de las 4 ruedas) ----
+    // lateral (deriva) → derrape · longitudinal negativo (bloqueo) → freno ·
+    // longitudinal positivo (patinada) → wheelspin. Tres timbres distintos.
+    let latScore = 0;
+    let lockScore = 0;
+    let spinScore = 0;
     let land = -1;
     let landVel = 0;
     let bottom = -1;
@@ -294,8 +302,12 @@ export class GameAudio {
     let clunk = 0;
     for (let i = 0; i < t.wheels.length; i++) {
       const w = t.wheels[i];
-      const s = Math.max(Math.abs(w.slipAngle) / 6, Math.abs(w.slipRatio) / 0.25);
-      if (s > slipScore) slipScore = s;
+      const lat = Math.abs(w.slipAngle) / 6;
+      const lock = Math.max(0, -w.slipRatio) / 0.25;
+      const spin = Math.max(0, w.slipRatio) / 0.25;
+      if (lat > latScore) latScore = lat;
+      if (lock > lockScore) lockScore = lock;
+      if (spin > spinScore) spinScore = spin;
       // contacto: aterrizajes
       if (w.contact && !this.prevContact[i] && Math.abs(w.travelVel) > 0.35) {
         if (Math.abs(w.travelVel) > landVel) {
@@ -313,24 +325,29 @@ export class GameAudio {
         clunk = -w.travelVel;
       }
     }
-    // suavizado del slip para modular las ganancias
+    // suavizado independiente por eje para modular las ganancias
     const k = clamp(dt * 12, 0, 1);
-    this.slip += (slipScore - this.slip) * k;
+    this.latSlip += (latScore - this.latSlip) * k;
+    this.lockSlip += (lockScore - this.lockSlip) * k;
+    this.spinSlip += (spinScore - this.spinSlip) * k;
 
-    // El derrape habla antes (desde slip 0.6) y nace agudo (rate 1.3): el
-    // slip medido se satura rapidísimo, así que casi todo el rango útil es
-    // chirrido pleno. En tierra apenas insinúa y en hierba calla.
-    const slipGain = smoothstep(0.6, 1.4, this.slip);
+    // El derrape habla antes (desde slip 0.6): el slip medido se satura
+    // rapidísimo, así que casi todo el rango útil es chirrido pleno. En
+    // tierra apenas insinúa y en hierba calla.
+    const latGain = smoothstep(0.6, 1.4, this.latSlip);
+    const lockGain = smoothstep(0.6, 1.4, this.lockSlip);
+    const spinGain = smoothstep(0.6, 1.4, this.spinSlip);
     const speedFactor = smoothstep(2, 9, speed);
     // Rate casi fijo en 1.0 (como en la página de audición): el pitch por
     // slip lo hacía sonar distinto al sample original.
     // TODO(pendiente): ataque de derrape — one-shot al iniciar el slide por
     // encima de este loop (el "arrancón" completo vive en sfx-candidates/c7).
     const squealSurface = surface === 'asphalt' ? 1 : surface === 'dirt' ? 0.12 : 0;
-    this.setLoop('tire_squeal_loop', paused ? 0 : MIX.squeal * slipGain * speedFactor * squealSurface, 1 + 0.3 * clamp(this.slip - 1, 0, 1));
-    // La frenada bloqueando ya alimenta el slip (vía slipRatio): no hay capa
-    // propia de freno, el derrape cubre ambos casos.
-    this.setLoop('wheelspin_loop', paused ? 0 : MIX.wheelspin * slipGain * (1 - 0.75 * speedFactor), 1);
+    this.setLoop('tire_squeal_loop', paused ? 0 : MIX.squeal * latGain * speedFactor * squealSurface, 1 + 0.3 * clamp(this.latSlip - 1, 0, 1));
+    // Bloqueo de frenada: el loop OGA anterior, más brillante y estable.
+    this.setLoop('brake_squeal_loop', paused ? 0 : MIX.brake * lockGain * speedFactor * squealSurface, 1);
+    // Patinada en vacío: domina en parado (quemada) y cede con la velocidad.
+    this.setLoop('wheelspin_loop', paused ? 0 : MIX.wheelspin * spinGain * (1 - 0.75 * speedFactor), 1);
 
     // ---- Scrape de bajos: rodado extremo ----
     const scrapeScore = Math.max(
