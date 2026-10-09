@@ -4,7 +4,7 @@
  * `Esc` o el botón "Conducir".
  */
 import { CARS, CAR_ORDER, type CarId } from '../vehicle/cars';
-import { TRACKS, TRACK_ORDER, trackLength, type TrackId } from '../world/track';
+import { TRACKS, TRACK_ORDER, RING_TRACK_ID, trackLength, type TrackId } from '../world/track';
 import type { CameraMode } from '../render/cameraRig';
 
 export interface MenuActions {
@@ -66,6 +66,25 @@ export class Menu {
         card.addEventListener('click', () => this.actions.onSelectTrack(id));
         host.appendChild(card);
         this.trackCards.set(id, card);
+      }
+    }
+
+    // El anillo 1:1 vive en su propia sección (mundo grande con streaming).
+    {
+      const host = root.querySelector<HTMLElement>('#menu-ring');
+      const def = TRACKS[RING_TRACK_ID];
+      if (host && def) {
+        const card = document.createElement('button');
+        card.className = 'menu-card';
+        card.dataset.track = RING_TRACK_ID;
+        const km = (trackLength(def) / 1000).toFixed(2);
+        card.innerHTML =
+          `<div class="menu-card-title">${def.badge}</div>` +
+          `<div class="menu-card-sub">${def.inspiration} · ${km} km · ${def.width} m</div>` +
+          `<div class="menu-card-desc">${def.description}</div>`;
+        card.addEventListener('click', () => this.actions.onSelectTrack(RING_TRACK_ID));
+        host.appendChild(card);
+        this.trackCards.set(RING_TRACK_ID, card);
       }
     }
 

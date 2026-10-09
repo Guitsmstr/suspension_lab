@@ -88,6 +88,7 @@ lentas:
 | **🛣 Interlagos Mini** | asfalto | mixto centro-este: S inicial, curva ciega, exterior a fondo, horquilla alta y bajada | ~410 m · 7 m |
 | **🏜 Baja Whoops** | tierra | rápida oeste con la recta de badenes como tramo de saltos y cerrada al fondo | ~450 m · 6 m |
 | **🏜 Estadio Rallycross** | tierra | técnico centro-oeste: esses, horquilla alta y bajada sin respiro | ~290 m · 5,5 m |
+| **🇩🇪 Nordschleife** | asfalto 1:1 | bucle Touristenfahrten real de 20,8 km y ~300 m de desnivel, en su propio mundo con streaming (ver «Mundo grande») | 20,76 km · 10 m |
 
 El asfalto lleva líneas de borde y **pianos rojo/blanco en las curvas** (3 losas de
 1 m por piano, cada una con su altura y caída); la tierra, **conos naranjas**
@@ -114,6 +115,40 @@ las calzadas y las barreras (con rebote de 250 ms). La decoración nunca nace
 sobre ninguna calzada.
 
 El mapa está cerrado: una barrera a rayas rojas y blancas marca el perímetro (±150 m) y un muro invisible recorta la posición a ±148 m amortiguando la salida, así que es imposible salirse del mundo o caer al vacío.
+
+### Mundo grande: Nürburgring Nordschleife 1:1
+
+Desde la sección «Mundo grande» del menú se entra al **bucle Touristenfahrten real
+a escala 1:1**: 20 758 m de cuerda (oficial 20 832 m), 10 m de calzada y ~294 m
+de desnivel (333 → 628 m, oficial 320 → 627 m), con salida en Döttinger Höhe.
+
+- **Datos**: traza en planta (~3000 pts, realineada a mano sobre la carretera)
+  de `maciejb2k/nurburgring-nordschleife-geojson` + cotas SRTM (open-meteo),
+  horneadas a estaciones uniformes cada 3 m con `scripts/bake-ring.mjs`.
+  El DEM crudo trae escalones de ladera/dosel de hasta el 80 %: el bake aplica
+  mediana + gaussiana σ=45 m y una **relajación con prior de diseño vial**
+  (pendiente ≤12 %, rasantes con R≥150 m — una carretera no puede excederlos,
+  así que lo que sobra es error de medida). Atribución:
+  © OpenStreetMap contributors (ODbL) · traza vía maciejb2k · SRTM vía open-meteo.
+- **Terreno y física**: `RingTerrain` implementa el mismo contrato que el mundo
+  pequeño (la física no sabe en qué mundo está: `main.ts` delega con
+  `SwitchableTerrain`). La referencia de calzada es plana transversal y exacta
+  (ancla la abscisa sin el deslizamiento de la proyección al punto más
+  cercano); fuera, funde hacia la cota del valle (rejilla horneada) más
+  colinas de Eifel analíticas. La hierba usa la variante esculpida por debajo
+  (4 cm en recta, hasta 25 cm en horquillas por la curvatura en planta).
+- **Streaming**: el mundo mide ~6×5 km y no cabe en una malla densa. La calzada
+  (76k vértices, un draw call) y un fondo de baja resolución van siempre; la
+  hierba se pagina en **teselas de 256 m** en ~800 m alrededor del coche
+  (≤2 por fotograma, el resto se libera). Cámara con far 6000 y calima en vez
+  de niebla densa.
+- **Alcance de la fase 1**: geometría, cotas, crono y conducción verificados
+  (`scripts/ring-check.mjs`, 22 comprobaciones en navegador + 16 en
+  `physics-smoke`, incluido un **barrido anti-hierba** que reproduce la
+  interpolación exacta de la GPU en los 20,8 km y localiza cada mota verde
+  sobre la cinta con su `s` para ir a fotografiarla con
+  `scripts/ring-spots.mjs`). Sin mobiliario todavía: ni guardarraíles, ni
+  pianos, ni bosque, ni boxes — la hierba frena (×0,4) si te sales, como debe ser.
 
 La cámara de persecución no se aleja más de un **5 %** de la distancia elegida al acelerar: avanza con el desplazamiento del coche (sin retardo a velocidad) y el lerp solo suaviza ruido y giros, así que no tiembla yendo rápido. El zoom manual con la rueda no tiene este límite.
 
@@ -305,6 +340,16 @@ src/
 │   ├── terrain.ts         # terreno analítico = física + render coinciden
 │   ├── surface.ts         # superficies (asfalto/tierra/hierba) y su μ
 │   ├── track.ts           # 4 circuitos (asfalto/tierra) + barrera y muro del mapa
+│   │                        # (+ ficha del Nordschleife para menú/minimapa/crono)
+│   ├── ring/              # Nürburgring 1:1 (mundo grande con streaming)
+│   │   ├── centerline-data.ts # geometría horneada (scripts/bake-ring.mjs, no editar)
+│   │   ├── centerline.ts    # acceso a estaciones, cotas y rejilla base
+│   │   ├── spatialIndex.ts  # rejilla O(1) para la física a 300 Hz
+│   │   ├── ringTerrain.ts   # TerrainSampler + esculpido para la hierba
+│   │   ├── roadChunks.ts    # calzada de 20,8 km + líneas + meta
+│   │   ├── groundTiles.ts   # teselas de hierba con streaming + fondo
+│   │   ├── ringDef.ts       # ficha del circuito + aparición
+│   │   └── ringWorld.ts     # fachada + conmutación de mundos
 │   ├── race.ts            # crono por vuelta + reglas (sectores, dirección)
 │   ├── scenery.ts         # assets CC0 instanciados (árboles, rocas, césped)
 │   ├── obstacles.ts       # colisionadores de rocas y troncos (rejilla espacial)
@@ -320,6 +365,12 @@ src/
 
 ## Ideas para seguir
 
+- **Nordschleife fase 2** (decoración y detalle funcional): guardarraíles a
+  ambos lados (instanciados por teselas, con colisionador), pianos en las
+  curvas usando la curvatura horneada, bosque de Eifel con streaming (abetos y
+  hayas donde la traza deja arcenes reales), boxes y Gantry de Döttinger Höhe,
+  peraltes reales (Karussell), ancho variable 8–11 m y DEM de mayor resolución
+  para recuperar los saltos cortos (Pflanzgarten).
 - Registro de telemetría sobre un tramo de badenes (road test) con gráficas.
 - Freno ABS y control de tracción.
 - Suspensión con ejes de dirección instantáneos completos (restricciones de barras resueltas).

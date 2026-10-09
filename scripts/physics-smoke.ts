@@ -26,6 +26,11 @@ import {
   type TrackId,
 } from '../src/world/track';
 import { rideMetrics, FRONT_KINEMATICS, REAR_KINEMATICS } from '../src/vehicle/suspension';
+import { LOOP_LENGTH, RING_STEP, ROAD_HALF, curvatureAt, stationPos, tangentAt } from '../src/world/ring/centerline';
+import { RingTerrain } from '../src/world/ring/ringTerrain';
+import { buildRingRoad } from '../src/world/ring/roadChunks';
+import { buildBackdropGeometry, RING_BACKDROP, backdropVertexY } from '../src/world/ring/groundTiles';
+import { ringSpawn } from '../src/world/ring/ringDef';
 import { tireForces, CAMBER_STIFFNESS } from '../src/vehicle/tire';
 import { Drivetrain } from '../src/vehicle/drivetrain';
 import { SPRUNG_MASS_FRONT, SPRUNG_MASS_REAR } from '../src/vehicle/vehicle';
@@ -1231,6 +1236,189 @@ scenario('El suelo blando frena y hunde', (p, _t, v) => {
     `asfalto -${dropAsphalt.toFixed(2)} m/s vs hierba -${dropGrass.toFixed(2)} m/s`);
   check('en hierba la rueda se hunde más', deflGrass > deflAsphalt + 0.003,
     `${(deflAsphalt * 1000).toFixed(0)} → ${(deflGrass * 1000).toFixed(0)} mm`);
+});
+
+// --------------------------------------- 9. Nürburgring Nordschleife 1:1
+scenario('Nordschleife 1:1: geometría, cotas y calzada', (_p, _t, _v) => {
+  // Longitud oficial del bucle sin GP: 20832 m (traza Touristenfahrten).
+  check('longitud 1:1 (≈20,8 km)', Math.abs(LOOP_LENGTH - 20758) < 400, `${LOOP_LENGTH.toFixed(0)} m`);
+  // Desnivel oficial: ~320 m (Breidscheid) a ~627 m (Hohe Acht).
+  let mn = Infinity, mx = -Infinity;
+  const probe = { x: 0, z: 0, y: 0 };
+  for (let i = 0; i < 6919; i += 7) {
+    stationPos(i, probe);
+    if (probe.y < mn) mn = probe.y;
+    if (probe.y > mx) mx = probe.y;
+  }
+  check('desnivel 1:1 (~300 m)', mn > 300 && mn < 360 && mx > 600 && mx < 660,
+    `${mn.toFixed(0)} → ${mx.toFixed(0)} m`);
+  // La física pisa la cota exacta de la pista en todo el anillo.
+  const rt = new RingTerrain();
+  let maxErr = 0;
+  for (let s = 0; s < LOOP_LENGTH; s += 211) {
+    const i = Math.round(s / 3.0002) % 6919;
+    stationPos(i, probe);
+    maxErr = Math.max(maxErr, Math.abs(rt.heightAt(probe.x, probe.z) - probe.y));
+  }
+  check('la física coincide con la cota (≤1 mm)', maxErr < 0.001, `err máx ${(maxErr * 1000).toFixed(2)} mm`);
+  // Perfil vial: sin rampas imposibles ni rasantes que lancen el coche.
+  let gmax = 0;
+  let kMin = Infinity;
+  const pa = { x: 0, z: 0, y: 0 };
+  const pb = { x: 0, z: 0, y: 0 };
+  const pc = { x: 0, z: 0, y: 0 };
+  for (let i = 0; i < 6919; i++) {
+    stationPos(i, pa);
+    stationPos((i + 1) % 6919, pb);
+    stationPos((i + 2) % 6919, pc);
+    const d = Math.hypot(pb.x - pa.x, pb.z - pa.z) || 1;
+    gmax = Math.max(gmax, Math.abs(pb.y - pa.y) / d);
+    const k = Math.abs(pa.y - 2 * pb.y + pc.y) / (d * d);
+    if (k > 1e-9) kMin = Math.min(kMin, 1 / k);
+  }
+  check('pendiente máxima de carretera (<15 %)', gmax < 0.15, `${(gmax * 100).toFixed(1)} %`);
+  check('rasantes suaves (Rmin > 100 m)', kMin > 100, `Rmin ${kMin.toFixed(0)} m`);
+  // Esculpido: bajo la cinta la hierba queda por debajo (4 cm en recta,
+  // más en curva: la cinta curva dentro de la celda y el plano la cortaría).
+  stationPos(100, probe);
+  const wantCarve = Math.min(0.25, 0.04 + 3 * Math.abs(curvatureAt(100 * RING_STEP)));
+  const onRoad = rt.meshHeightAt(probe.x, probe.z);
+  check('esculpido bajo la cinta (regla adaptativa)', Math.abs(onRoad - (probe.y - wantCarve)) < 0.002,
+    `${((probe.y - onRoad) * 100).toFixed(1)} cm (regla ${(wantCarve * 100).toFixed(1)} cm)`);
+  const far = rt.heightAt(probe.x + 400, probe.z + 400);
+  check('lejos de la pista no hay esculpido', Math.abs(rt.meshHeightAt(probe.x + 400, probe.z + 400) - far) < 1e-9);
+  // La salida es asfalto y la malla de la calzada es válida.
+  const sp = ringSpawn();
+  check('la salida pisa asfalto', (rt.surfaceMuAt?.(sp.x, sp.z) ?? 0) > 0.95);
+  check('la salida mira en el sentido de marcha', Number.isFinite(sp.yaw));
+  const road = buildRingRoad();
+  const posAttr = road.geometry.getAttribute('position') as THREE.BufferAttribute;
+  let bad = 0;
+  for (let i = 0; i < posAttr.count; i += 13) {
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    if (!Number.isFinite(x + y + z) || y < 300 || y > 660) bad++;
+  }
+  check('malla de 20,8 km válida', posAttr.count > 50000 && bad === 0, `${posAttr.count} vértices`);
+  // El fondo (paso 32 m) no puede tapar la cinta: sus cuerdas se levantarían
+  // hasta 1 m en las hondonadas, así que sus vértices del corredor van 2 m
+  // por debajo de la cota (antes, con paso 64 m y sin clavado, la hierba
+  // enterraba la pista a lo lejos).
+  const backGeo = buildBackdropGeometry(rt);
+  const backPos = backGeo.getAttribute('position') as THREE.BufferAttribute;
+  let backBad = 0;
+  let backCorr = 0;
+  for (let i = 0; i < backPos.count; i += 3) {
+    const x = backPos.getX(i), y = backPos.getY(i), z = backPos.getZ(i);
+    if (!Number.isFinite(x + y + z) || y < 100 || y > 900) {
+      backBad++;
+      continue;
+    }
+    const p = rt.trackProximity(x, z);
+    if (p && p.dist < ROAD_HALF + 40) {
+      backCorr++;
+      if (y > p.elev - 2.9) backBad++;
+    }
+  }
+  check('el fondo no tapa la cinta', backBad === 0 && backCorr > 100,
+    `${backCorr} vértices de corredor clavados`);
+  backGeo.dispose();
+});
+
+// --------------------------------------- 9c. barrido anti-hierba del anillo
+/**
+ * Detección exacta de hierba sobre la cinta en los 20,8 km: reproduce la
+ * interpolación de la GPU (los dos triángulos de cada quad de PlaneGeometry)
+ * sobre la rejilla de teselas (4 m, alineada global) y la del fondo (32 m),
+ * y la compara con la cota de la calzada en cada estación × carril. Donde la
+ * hierba interpolada supera la cinta >3 mm el píxel se ve verde: el barrido
+ * informa `s` (distancia recorrida) para teletransportarse al punto y verlo.
+ */
+scenario('Nordschleife 1:1: barrido anti-hierba por interpolación exacta', (_p, _t, _v) => {
+  const rt = new RingTerrain();
+  // Superficie GPU en (x, z) sobre una rejilla de paso `step` con esquina
+  // (ox, ozTop) = mundo del vértice (ix=0, iy=0). `yAt` = altura de vértice.
+  const triSurfaceAt = (
+    ox: number, ozTop: number, step: number,
+    x: number, z: number, yAt: (vx: number, vz: number) => number,
+  ): number => {
+    const fx = (x - ox) / step;
+    const fy = (ozTop - z) / step;
+    const ix = Math.floor(fx);
+    const iy = Math.floor(fy);
+    const u = fx - ix;
+    const v = fy - iy;
+    const x0 = ox + ix * step;
+    const z0 = ozTop - iy * step;
+    if (u + v <= 1) {
+      const ha = yAt(x0, z0);
+      const hb = yAt(x0, z0 - step);
+      const hd = yAt(x0 + step, z0);
+      return ha + u * (hd - ha) + v * (hb - ha);
+    }
+    const hb = yAt(x0, z0 - step);
+    const hc = yAt(x0 + step, z0 - step);
+    const hd = yAt(x0 + step, z0);
+    return hc + (1 - u) * (hb - hc) + (1 - v) * (hd - hc);
+  };
+  const tileYAt = (x: number, z: number): number => rt.meshHeightAt(x, z);
+  // Misma regla que la geometría real (sin derivas): ver `backdropVertexY`.
+  const backYAt = (x: number, z: number): number => backdropVertexY(rt, x, z);
+  const probe = { x: 0, z: 0, y: 0 };
+  const tan = { x: 0, z: 0 };
+  const pokes: Array<{ s: number; o: number; depth: number; layer: string; x: number; z: number }> = [];
+  const N = 6919;
+  for (let i = 0; i < N; i++) {
+    stationPos(i, probe);
+    tangentAt(i * RING_STEP, tan);
+    const sx = -tan.z;
+    const sz = tan.x;
+    for (let o = -5; o <= 5; o++) {
+      const x = probe.x + sx * o;
+      const z = probe.z + sz * o;
+      const roadY = probe.y;
+      const tileH = triSurfaceAt(0, 0, 4, x, z, tileYAt);
+      if (tileH > roadY + 0.003) {
+        pokes.push({ s: i * RING_STEP, o, depth: tileH - roadY, layer: 'tesela', x, z });
+      }
+      const backH = triSurfaceAt(RING_BACKDROP.ox, RING_BACKDROP.ozTop, RING_BACKDROP.step, x, z, backYAt);
+      if (backH > roadY + 0.003) {
+        pokes.push({ s: i * RING_STEP, o, depth: backH - roadY, layer: 'fondo', x, z });
+      }
+    }
+  }
+  pokes.sort((a, b) => b.depth - a.depth);
+  const tilePokes = pokes.filter((p) => p.layer === 'tesela');
+  const backPokes = pokes.filter((p) => p.layer === 'fondo');
+  console.log(`    barrido: ${N * 11} muestras · ${tilePokes.length} tesela · ${backPokes.length} fondo`);
+  for (const p of tilePokes.slice(0, 10)) {
+    console.log(`    tesela s=${p.s.toFixed(0)}m lat=${p.o}m +${(p.depth * 1000).toFixed(0)}mm @(${p.x.toFixed(1)},${p.z.toFixed(1)})`);
+  }
+  for (const p of backPokes.slice(0, 5)) {
+    console.log(`    fondo s=${p.s.toFixed(0)}m lat=${p.o}m +${(p.depth * 1000).toFixed(0)}mm @(${p.x.toFixed(1)},${p.z.toFixed(1)})`);
+  }
+  check('las teselas no asoman por la cinta', tilePokes.length === 0,
+    tilePokes.length ? `peor +${(tilePokes[0].depth * 1000).toFixed(0)}mm en s=${tilePokes[0].s.toFixed(0)}m` : 'limpio');
+  check('el fondo no asoma por la cinta', backPokes.length === 0,
+    backPokes.length ? `${backPokes.length} puntos (ver arriba)` : 'limpio');
+});
+
+scenario('Nordschleife 1:1: el coche se asienta y rueda en la pista real', (p, _t, _v) => {
+  const rt = new RingTerrain();
+  rt.setRoughness(p.get('roughness'));
+  const v = new Vehicle(p, rt, undefined, 'sport');
+  const sp = ringSpawn();
+  v.setSpawn(sp.x, sp.z, sp.yaw);
+  run(v, 3, NO_INPUT);
+  check('valores finitos en la cota real', isFiniteVehicle(v));
+  check('las 4 ruedas apoyan en el asfalto real', v.cornerStates.every((s) => s.contact));
+  check('superficie bajo el coche: asfalto', v.telemetry.surface === 'asphalt', v.telemetry.surface);
+  // Rodar 6 s a medio gas por Döttinger Höhe sin divergir ni hundirse.
+  run(v, 6, { ...NO_INPUT, throttle: 0.6 });
+  check('rueda por el anillo sin divergir', isFiniteVehicle(v) && v.telemetry.speed > 15,
+    `${v.telemetry.speedKph.toFixed(0)} km/h`);
+  check('sigue sobre la pista (cota coherente)',
+    Math.abs(v.position.y - rt.heightAt(v.position.x, v.position.z) - v.comHeight) < 0.5,
+    `y=${v.position.y.toFixed(1)} m`);
 });
 
 console.log(`\n${failures === 0 ? '✅ TODAS LAS PRUEBAS PASAN' : `❌ ${failures} PRUEBA(S) FALLAN`}`);

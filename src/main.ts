@@ -13,6 +13,8 @@ import { buildScenery, type SceneryHandle } from './world/scenery';
 import {
   TRACKS,
   TRACK_ORDER,
+  TRACK_BOUND,
+  RING_TRACK_ID,
   buildBoundary,
   buildTrack,
   enforceTrackBounds,
@@ -23,6 +25,8 @@ import {
   type TrackId,
   type TrackMode,
 } from './world/track';
+import { RING_BOUND, RingWorld, SwitchableObstacles, SwitchableTerrain } from './world/ring/ringWorld';
+import { ringSpawn } from './world/ring/ringDef';
 import { CarVisual } from './render/carMesh';
 import { CameraRig, type CameraMode } from './render/cameraRig';
 import { Minimap } from './render/minimap';
@@ -52,6 +56,7 @@ export interface SimDebug {
   cameraRig: CameraRig;
   minimap: Minimap;
   scenery: SceneryHandle;
+  ring: RingWorld;
   trackMode: () => TrackMode;
   trackId: () => TrackId;
   carId: () => CarId;
@@ -133,6 +138,14 @@ async function boot(): Promise<void> {
     const boundary = buildBoundary(terrain);
     scene.add(boundary.group);
 
+    loader.setProgress(0.455, 'Trazando el Nordschleife 1:1');
+    await nextPaint();
+
+    const ring = new RingWorld((done, total) => {
+      loader.setProgress(0.455 + 0.02 * (done / total), `Trazando el Nordschleife 1:1 (${done}/${total})`);
+    });
+    scene.add(ring.group);
+
     // Si cambia la rugosidad en vivo, la altura analítica cambia: hay que
     // reconstruir la malla del terreno ADEMÁS de calzadas y barreras. Antes
     // solo se reconstruían las calzadas, así que la física (nueva altura) y
@@ -147,13 +160,23 @@ async function boot(): Promise<void> {
         scene.remove(terrainMesh);
         terrainMesh.geometry.dispose();
         terrainMesh = fresh;
+        terrainMesh.visible = !worldTerrain.useRing;
         scene.add(terrainMesh);
         for (const handle of tracks.values()) handle.refresh();
         boundary.refresh();
       }, 250);
     };
     params.onChange((key) => {
-      if (key === 'roughness') scheduleRoadRefresh();
+      if (key !== 'roughness') return;
+      ring.terrain.setRoughness(params.get('roughness'));
+      if (worldTerrain.useRing) {
+        // En el anillo la rugosidad solo mueve las colinas (la pista manda):
+        // se re-mallan las teselas visibles en vez del mundo pequeño.
+        ring.refreshTiles();
+        ring.ensureAround(vehicle.position.x, vehicle.position.z);
+      } else {
+        scheduleRoadRefresh();
+      }
     });
 
     loader.setProgress(0.48, 'Compilando cielo, sol y sombras');
@@ -167,7 +190,15 @@ async function boot(): Promise<void> {
 
     let carId: CarId = 'sport';
     let trackId: TrackId = 'monaco';
-    const vehicle = new Vehicle(params, terrain, scenery.obstacles, carId);
+    // La física delega en el mundo activo: el coche no se reconstruye al
+    // cambiar entre el mapa de 320 m y el anillo 1:1.
+    const worldTerrain = new SwitchableTerrain();
+    worldTerrain.small = terrain;
+    worldTerrain.ring = ring.terrain;
+    const worldObstacles = new SwitchableObstacles();
+    worldObstacles.small = scenery.obstacles;
+    worldObstacles.ring = ring.obstacles;
+    const vehicle = new Vehicle(params, worldTerrain, worldObstacles, carId);
     params.applyPreset(CARS[carId].preset);
     {
       const s = trackSpawn(TRACKS[trackId]);
@@ -236,9 +267,34 @@ async function boot(): Promise<void> {
     const trackBadge = document.getElementById('track-badge');
     const carBadge = document.getElementById('car-badge');
 
+    /** Reaparece el coche en la salida del circuito activo (cada mundo, la suya). */
+    const spawnOnTrack = (): void => {
+      if (trackId === RING_TRACK_ID) {
+        const s = ringSpawn();
+        vehicle.setSpawn(s.x, s.z, s.yaw);
+        ring.ensureAround(s.x, s.z);
+      } else {
+        const s = trackSpawn(TRACKS[trackId]);
+        vehicle.setSpawn(s.x, s.z, s.yaw);
+      }
+    };
+
     const applyTrack = (id: TrackId, teleport = true): void => {
       trackId = id;
-      for (const [mode, handle] of tracks) handle.group.visible = mode === trackId;
+      const isRing = trackId === RING_TRACK_ID;
+      // Conmutación de mundos: solo uno visible y la física delega en el suyo.
+      worldTerrain.useRing = isRing;
+      worldObstacles.useRing = isRing;
+      ring.group.visible = isRing;
+      terrainMesh.visible = !isRing;
+      scenery.group.visible = !isRing;
+      boundary.group.visible = !isRing;
+      for (const [mode, handle] of tracks) handle.group.visible = !isRing && mode === trackId;
+      // El mundo grande necesita ver lejos (6 km de bbox) con calima; el
+      // pequeño, precisión de profundidad de cerca.
+      camera.far = isRing ? 6000 : 1200;
+      camera.updateProjectionMatrix();
+      if (scene.fog instanceof THREE.FogExp2) scene.fog.density = isRing ? 0.0006 : 0.0015;
       const def = TRACKS[trackId];
       // La Barranquilla va casi lisa por defecto; el usuario puede retocarla
       // con el slider después (el valor por circuito solo se aplica al entrar).
@@ -246,14 +302,12 @@ async function boot(): Promise<void> {
         params.set('roughness', def.defaultRoughness);
         panel.syncFromStore();
       }
+      ring.terrain.setRoughness(params.get('roughness'));
       if (trackBadge) trackBadge.textContent = def.badge;
       panel.setTrackLabel(def.name);
       race.setTrack(def);
       minimap.setTrack(def);
-      if (teleport) {
-        const s = trackSpawn(def);
-        vehicle.setSpawn(s.x, s.z, s.yaw);
-      }
+      if (teleport) spawnOnTrack();
       menu.refresh(carId, trackId, cameraRig.mode);
     };
     const cycleTrack = (): void => {
@@ -283,8 +337,7 @@ async function boot(): Promise<void> {
         race.reset();
         // El 4x4 pisa más alto: se reaparece en el inicio del circuito activo
         // para asentar la nueva altura de rodaje.
-        const s = trackSpawn(TRACKS[trackId]);
-        vehicle.setSpawn(s.x, s.z, s.yaw);
+        spawnOnTrack();
         if (carBadge) carBadge.textContent = spec.badge;
         menu.refresh(carId, trackId, cameraRig.mode);
         if (window.__sim) window.__sim.carVisual = car;
@@ -315,12 +368,9 @@ async function boot(): Promise<void> {
     applyTrack(trackId, false);
     applyCar(carId);
     {
-      // applyCar reaparece el coche; se deja sobre la salida de Barranquilla
-      const s = trackSpawn(TRACKS[trackId]);
-      vehicle.setSpawn(s.x, s.z, s.yaw);
-    }
-
-    window.__sim = {
+      // applyCar reaparece el coche; se deja sobre la salida del circuito inicial
+      spawnOnTrack();
+    }    window.__sim = {
       vehicle,
       carVisual: car,
       camera,
@@ -329,6 +379,7 @@ async function boot(): Promise<void> {
       cameraRig,
       minimap,
       scenery,
+      ring,
       trackMode: () => trackId,
       trackId: () => trackId,
       carId: () => carId,
@@ -446,8 +497,8 @@ async function boot(): Promise<void> {
           }
           if (steps === MAX_SUBSTEPS) accumulator = 0;
           renderAlpha = Math.min(1, Math.max(0, accumulator / PHYSICS_DT));
-          // Muro invisible: el mapa está cerrado
-          enforceTrackBounds(vehicle);
+          // Muro invisible: el mapa está cerrado (cada mundo, su límite).
+          enforceTrackBounds(vehicle, worldTerrain.useRing ? RING_BOUND : TRACK_BOUND);
 
           // Crono y reglas (con el juego en marcha; congelado en cuenta atrás)
           if (!countdown.active) {
@@ -468,12 +519,16 @@ async function boot(): Promise<void> {
             }
           }
 
-          // Red de seguridad: si cae del mundo, reaparece
-          if (vehicle.position.y < -40) vehicle.reset();
+          // Red de seguridad: si cae del mundo, reaparece (cota relativa al
+          // terreno activo: el anillo vive a ~300-600 m absolutos).
+          if (vehicle.position.y < worldTerrain.heightAt(vehicle.position.x, vehicle.position.z) - 30) {
+            vehicle.reset();
+          }
         }
 
         car.update(vehicle, dt, renderAlpha);
         cameraRig.apply(camera, vehicle, dt, renderAlpha);
+        ring.update(vehicle.position.x, vehicle.position.z);
         fwdMini.set(0, 0, 1).applyQuaternion(vehicle.quaternion);
         minimap.update(vehicle.position.x, vehicle.position.z, fwdMini.x, fwdMini.z);
         followSun(env, car.group.position);

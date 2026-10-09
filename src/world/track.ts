@@ -1,7 +1,11 @@
 /**
- * Circuitos conmutables y barrera perimetral que cierra el mapa.
+ * Circuitos conmutables y barrera perimetral que cierra el mapa pequeño.
  *
  * Cuatro trazados en dos superficies que usan casi todo el mapa (±140 m):
+ * (ver listado abajo). El Nürburgring Nordschleife 1:1 vive en su propio
+ * mundo grande (`src/world/ring/`, ~6×5 km con streaming) y solo comparte
+ * con este módulo la ficha `TRACKS.nurburgring` (menú, minimapa, crono):
+ * no entra en TRACK_ORDER y el esculpido/superficies de aquí no lo tocan.
  *
  * - Asfalto:
  *   · `monaco` — "Barranquilla" (~2000 m): anillo en B dibujado por el
@@ -31,8 +35,9 @@
 import * as THREE from 'three';
 import type { Terrain } from './terrain';
 import type { Vehicle } from '../vehicle/vehicle';
+import { NURBURGRING_DEF } from './ring/ringDef';
 
-export type TrackId = 'monaco' | 'interlagos' | 'baja' | 'stadium';
+export type TrackId = 'monaco' | 'interlagos' | 'baja' | 'stadium' | 'nurburgring';
 /** Alias histórico: antes solo había dos modos (asfalto/tierra). */
 export type TrackMode = TrackId;
 export type TrackSurface = 'asfalto' | 'tierra';
@@ -52,6 +57,8 @@ export interface TrackDef {
   points: Array<[number, number]>;
   /** Ancho de la calzada [m]. */
   width: number;
+  /** Longitud exacta [m], si se conoce mejor que la curva (p. ej. el anillo 1:1 horneado). */
+  lengthMeters?: number;
   /** Rugosidad del terreno al entrar al circuito (si se define). */
   defaultRoughness?: number;
   /** Líneas de borde blancas (solo asfalto). */
@@ -59,6 +66,7 @@ export interface TrackDef {
 }
 
 export const TRACKS: Record<TrackId, TrackDef> = {
+  nurburgring: NURBURGRING_DEF,
   monaco: {
     id: 'monaco',
     name: 'Barranquilla',
@@ -352,6 +360,13 @@ export const TRACKS: Record<TrackId, TrackDef> = {
 };
 
 export const TRACK_ORDER: TrackId[] = ['monaco', 'interlagos', 'baja', 'stadium'];
+/**
+ * El Nürburgring 1:1 vive fuera del mundo pequeño (ver `src/world/ring/`):
+ * no entra en TRACK_ORDER (esculpido, superficies y decoración del mapa de
+ * 320 m no lo tocan) y la tecla T solo rota los cuatro trazados clásicos.
+ * Se entra desde su sección del menú.
+ */
+export const RING_TRACK_ID: TrackId = 'nurburgring';
 
 /** Semiextensión del muro invisible [m]; el terreno mide 320 m de lado. */
 export const TRACK_BOUND = 148;
@@ -427,6 +442,7 @@ export function trackSpawn(def: TrackDef): { x: number; z: number; yaw: number }
 
 /** Longitud del eje del trazado [m] (para la ficha del menú). */
 export function trackLength(def: TrackDef): number {
+  if (def.lengthMeters !== undefined) return def.lengthMeters;
   return trackCurve(def).getLength();
 }
 
@@ -1104,23 +1120,24 @@ export function buildBoundary(terrain: Terrain): TrackHandle {
 /**
  * Muro invisible del mapa: recorta la posición y amortigua la componente de
  * la velocidad que apunta hacia fuera (pequeño rebote seco, sin túneles
- * porque el recorte es absoluto).
+ * porque el recorte es absoluto). `bound` permite reutilizarlo en el mundo
+ * grande del anillo (ver `RING_BOUND`).
  */
-export function enforceTrackBounds(v: Vehicle): void {
+export function enforceTrackBounds(v: Vehicle, bound = TRACK_BOUND): void {
   const p = v.position;
   const vel = v.velocity;
-  if (p.x > TRACK_BOUND) {
-    p.x = TRACK_BOUND;
+  if (p.x > bound) {
+    p.x = bound;
     if (vel.x > 0) vel.x *= -0.2;
-  } else if (p.x < -TRACK_BOUND) {
-    p.x = -TRACK_BOUND;
+  } else if (p.x < -bound) {
+    p.x = -bound;
     if (vel.x < 0) vel.x *= -0.2;
   }
-  if (p.z > TRACK_BOUND) {
-    p.z = TRACK_BOUND;
+  if (p.z > bound) {
+    p.z = bound;
     if (vel.z > 0) vel.z *= -0.2;
-  } else if (p.z < -TRACK_BOUND) {
-    p.z = -TRACK_BOUND;
+  } else if (p.z < -bound) {
+    p.z = -bound;
     if (vel.z < 0) vel.z *= -0.2;
   }
 }
