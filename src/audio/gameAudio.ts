@@ -349,6 +349,24 @@ export class GameAudio {
     // Patinada en vacío: domina en parado (quemada) y cede con la velocidad.
     this.setLoop('wheelspin_loop', paused ? 0 : MIX.wheelspin * spinGain * (1 - 0.75 * speedFactor), 1);
 
+    // ---- Barrido en suelo suelto: bloquear o derrapar en tierra/hierba ----
+    // barrea material en vez de chirriar (el chirrido agudo solo existe con
+    // agarre de asfalto). Sin esta capa, bloquear en tierra a 80 km/h quedaba
+    // casi mudo: el wheelspin se atenúa con la velocidad y el brake_squeal va
+    // al 12 % fuera del asfalto. Se suma sobre la rodadura base (setTargetAtTime
+    // admite dos escrituras por frame: gana la última).
+    if (!paused && (surface === 'dirt' || surface === 'grass')) {
+      const scrub = Math.max(lockGain, latGain) * speedFactor;
+      if (scrub > 0.001) {
+        const rate = 0.85 + 0.35 * smoothstep(0, 30, speed);
+        if (surface === 'dirt') {
+          this.setLoop('roll_dirt_loop', rollMaster + MIX.roll * 0.9 * scrub, rate);
+        } else {
+          this.setLoop('roll_grass_loop', rollMaster + MIX.roll * 0.6 * scrub, rate);
+        }
+      }
+    }
+
     // ---- Scrape de bajos: rodado extremo ----
     const scrapeScore = Math.max(
       smoothstep(55, 75, Math.abs(t.roll)),
