@@ -117,8 +117,8 @@ window.SFX_MANIFEST = [
     "group": "suspensión",
     "desc": "Golpe seco de tope de suspensión (bottom-out).",
     "gain": 0.85,
-    "src": "https://freesound.org/people/qubodup/sounds/332058/",
-    "credit": "qubodup — \"Collision\"",
+    "src": "https://freesound.org/people/BlondPanda/sounds/778419/",
+    "credit": "BlondPanda — \"Car_Door_Closing_Dull_02\" (-3 st)",
     "license": "CC0 1.0",
     "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
@@ -128,8 +128,8 @@ window.SFX_MANIFEST = [
     "group": "suspensión",
     "desc": "Golpe de tope fuerte (gran compresión / aterrizaje duro).",
     "gain": 0.9,
-    "src": "https://freesound.org/people/qubodup/sounds/332056/",
-    "credit": "qubodup — \"Fast Collision\"",
+    "src": "https://freesound.org/people/BlondPanda/sounds/778421/",
+    "credit": "BlondPanda — \"Car_Door_Closing_Dull_04\" (-5 st)",
     "license": "CC0 1.0",
     "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
@@ -139,8 +139,8 @@ window.SFX_MANIFEST = [
     "group": "suspensión",
     "desc": "Clunk de extensión/rebote de suspensión.",
     "gain": 0.75,
-    "src": "https://freesound.org/people/StarTowerStudio/sounds/424983/",
-    "credit": "StarTowerStudio — \"mixing_bowl_clunk\"",
+    "src": "https://freesound.org/people/BlondPanda/sounds/778418/",
+    "credit": "BlondPanda — \"Car_Door_Closing_Dull_01\" (-3 st)",
     "license": "CC0 1.0",
     "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
@@ -150,8 +150,8 @@ window.SFX_MANIFEST = [
     "group": "suspensión",
     "desc": "Aterrizaje de salto (impacto amortiguado + muelle + gravilla).",
     "gain": 0.9,
-    "src": "https://freesound.org/people/qubodup/sounds/332057/",
-    "credit": "qubodup — \"Fast Collision Reverb\"",
+    "src": "https://freesound.org/people/BlondPanda/sounds/778420/",
+    "credit": "BlondPanda — \"Car_Door_Closing_Dull_03\" (-4 st)",
     "license": "CC0 1.0",
     "licenseUrl": "https://creativecommons.org/publicdomain/zero/1.0/"
   },
