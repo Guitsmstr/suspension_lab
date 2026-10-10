@@ -107,10 +107,17 @@ export class CameraRig {
     this.yaw += diff * (1 - Math.exp(-2.6 * dt));
     this.dir.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
 
+    // Persecución con adaptación a la velocidad: a más velocidad se mira más
+    // lejos (si no, el morro tapa la pista) y la cámara se eleva y retrasa un
+    // poco en vez de pegarse al techo del coche.
+    const lookAhead = 4.5 + speed * 0.28;
+    const camHeight = 2.25 + Math.min(1.6, speed * 0.035);
+    const effDistance = this.distance + Math.min(4, speed * 0.05);
+
     const desired = new THREE.Vector3()
       .copy(pos)
-      .addScaledVector(this.dir, -this.distance)
-      .addScaledVector(this.up, 2.25);
+      .addScaledVector(this.dir, -effDistance)
+      .addScaledVector(this.up, camHeight);
     // no bajar del suelo
     desired.y = Math.max(desired.y, pos.y + 0.4);
 
@@ -127,7 +134,7 @@ export class CameraRig {
     {
       const dx = desired.x - pos.x;
       const dz = desired.z - pos.z;
-      const maxSep = this.distance * 1.05;
+      const maxSep = effDistance * 1.05;
       const sep = Math.hypot(dx, dz);
       if (sep > maxSep) {
         const k = maxSep / sep;
@@ -147,7 +154,7 @@ export class CameraRig {
     camera.position.copy(this.smoothPos);
 
     this.smoothTarget
-      .lerp(this.tmp.copy(pos).addScaledVector(this.up, 1.0).addScaledVector(this.dir, 4.5), 1 - Math.exp(-5 * dt));
+      .lerp(this.tmp.copy(pos).addScaledVector(this.up, 1.0).addScaledVector(this.dir, lookAhead), 1 - Math.exp(-5 * dt));
     camera.lookAt(this.smoothTarget);
   }
 }

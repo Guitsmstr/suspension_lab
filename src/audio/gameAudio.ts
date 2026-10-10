@@ -362,14 +362,14 @@ export class GameAudio {
     // ---- Eventos puntuales ----
     if (!paused) {
       if (land >= 0) {
-        this.play('land_thump', clamp(0.4 + landVel * 0.9, 0.4, 1), 0.94 + 0.12 * Math.min(1, landVel), 0.12);
+        this.play('land_thump', clamp(0.35 + landVel * 0.65, 0.35, 1), 0.94 + 0.12 * Math.min(1, landVel), 0.15);
       }
       if (bottom >= 0) {
         const heavy = bottomVel > 0.55;
-        this.play(heavy ? 'susp_bottomout_heavy' : 'susp_bottomout', clamp(0.45 + bottomVel, 0.45, 1), 0.96 + 0.08 * Math.min(1, bottomVel), 0.1);
+        this.play(heavy ? 'susp_bottomout_heavy' : 'susp_bottomout', clamp(0.3 + bottomVel * 1.1, 0.3, 1), 0.96 + 0.08 * Math.min(1, bottomVel), 0.15);
       }
       if (clunk > 0) {
-        this.play('susp_clunk', clamp(0.4 + clunk, 0.4, 1), 1, 0.12);
+        this.play('susp_clunk', clamp(0.3 + clunk * 0.8, 0.3, 1), 1, 0.15);
       }
 
       // Impactos: aceleración horizontal del chasis (Δv por frame).

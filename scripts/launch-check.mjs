@@ -188,16 +188,18 @@ const overlap = await page.evaluate(() => {
 check('el panel no tapa el minimapa', overlap !== null && overlap.panelBottom <= overlap.miniTop + 2,
   JSON.stringify(overlap));
 
-// --- 4b. la cámara no se aleja más del 5 % al acelerar ---
+// --- 4b. la cámara no se aleja más del 5 % (+ retroceso con velocidad) ---
 // A 33 km/h el retardo del suavizado la dejaría ~2 m atrás (+26 %); el tope lo impide.
+// La persecución se retrasa con la velocidad (speed*0.05, tope 4 m): la cota lo incluye.
 const camChase = await page.evaluate(() => {
   const s = window.__sim;
   const c = s.camera.position;
   const p = s.vehicle.position;
-  return { sep: Math.hypot(c.x - p.x, c.z - p.z), dist: s.cameraRig.distance };
+  const speed = s.vehicle.velocity.length();
+  return { sep: Math.hypot(c.x - p.x, c.z - p.z), dist: s.cameraRig.distance, speed };
 });
-check('la cámara no se aleja más del 5% al acelerar', camChase.sep <= camChase.dist * 1.06,
-  `separación ${camChase.sep.toFixed(2)} m con distancia ${camChase.dist.toFixed(2)} m`);
+check('la cámara no se aleja más del 5% al acelerar', camChase.sep <= (camChase.dist + Math.min(4, camChase.speed * 0.05)) * 1.06,
+  `separación ${camChase.sep.toFixed(2)} m con distancia ${camChase.dist.toFixed(2)} m a ${camChase.speed.toFixed(1)} m/s`);
 
 // --- 5. maniobra: giro + frenada ---
 // Rumbo del morro (componente x del +Z rotado por el cuaternión): girar a la

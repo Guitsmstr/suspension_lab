@@ -691,8 +691,11 @@ scenario('La cámara de persecución no mete tirones a 25 m/s', (_p, _t, _v) => 
   // lerp (ese recorte era el tembleque a alta velocidad).
   check('la cámara sale del suavizado sin recortes', camera.position.distanceTo(internals.smoothPos) < 1e-9);
   check('a 90 km/h no hay saltos por fotograma', maxJump < 0.8, `${(maxJump * 100).toFixed(0)} cm/fotograma`);
-  check('la distancia converge al tope del 5 %', sep <= rig.distance * 1.05 + 0.05,
-    `sep=${sep.toFixed(2)} m, tope=${(rig.distance * 1.05).toFixed(2)} m`);
+  // La persecución se retrasa con la velocidad (speed*0.05, tope 4 m): a 90 km/h
+  // el tope es la distancia efectiva, no la base.
+  const speed = 25;
+  check('la distancia converge al tope del 5 %', sep <= (rig.distance + Math.min(4, speed * 0.05)) * 1.05 + 0.05,
+    `sep=${sep.toFixed(2)} m, tope=${((rig.distance + Math.min(4, speed * 0.05)) * 1.05).toFixed(2)} m`);
 });
 
 // ------------------------- 5e-bis. el render interpolado no tiembla
