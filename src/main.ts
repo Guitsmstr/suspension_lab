@@ -388,8 +388,11 @@ async function boot(): Promise<void> {
       race,
     };
 
-    // Ratón: arrastrar orbita, rueda hace zoom
+    // Ratón: arrastrar orbita, rueda hace zoom. En táctil el arrastre NO saca
+    // de la persecución (si no, sería imposible conducir): la órbita se elige
+    // con 📷 o desde el menú.
     let dragging = false;
+    let touchDrive = false;
     let lastX = 0;
     let lastY = 0;
     renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -402,7 +405,7 @@ async function boot(): Promise<void> {
     });
     window.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      cameraRig.drag(e.clientX - lastX, e.clientY - lastY);
+      cameraRig.drag(e.clientX - lastX, e.clientY - lastY, !touchDrive);
       panel.setCameraLabel(cameraRig.modeLabel);
       lastX = e.clientX;
       lastY = e.clientY;
@@ -449,7 +452,8 @@ async function boot(): Promise<void> {
 
     // Controles táctiles (solo se muestran en teléfono): botones + giro por
     // inclinación. En pantallas pequeñas el panel arranca contraído para dejar
-    // ver la pista.
+    // ver la pista. La cámara ya arranca en persecución (3ª persona); en táctil
+    // se garantiza por si algo la hubiera movido.
     const touch = new TouchControls(input, {
       onReset: () => {
         vehicle.reset();
@@ -460,8 +464,21 @@ async function boot(): Promise<void> {
         paused = !paused;
         panel.setPaused(paused);
       },
+      onMenu: () => {
+        menu.show();
+        menu.refresh(carId, trackId, cameraRig.mode);
+      },
+      onCamera: () => {
+        panel.setCameraLabel(cameraRig.nextMode());
+        menu.refresh(carId, trackId, cameraRig.mode);
+      },
     });
-    if (touch.isTouch && window.innerWidth < 860) panel.toggleCollapsed();
+    touchDrive = touch.isTouch;
+    if (touch.isTouch) {
+      while (cameraRig.mode !== 'chase') cameraRig.nextMode();
+      panel.setCameraLabel(cameraRig.modeLabel);
+      if (window.innerWidth < 860) panel.toggleCollapsed();
+    }
 
     const frame = (): void => {
       if (!running) return;

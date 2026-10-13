@@ -305,9 +305,18 @@ check('obstáculos sólidos publicados', scenery.obstacles > 40, `${scenery.obst
 // La densidad junto al coche se verifica por salida en 5e (cada circuito).
 
 // --- 5e. circuitos: T rota por los 4 trazados (cada uno con su ruta) ---
+// A 3-5 fps por software un intervalo entre fotogramas puede superar los
+// 300 ms fijos: se espera al cambio real de circuito tras cada pulsación
+// (igual que en la apertura del menú) en vez de muestrear a tiempo fijo.
 const seenTracks = [];
 for (let i = 0; i < 4; i++) {
+  const prevTrack = await page.evaluate(() => window.__sim.trackId());
   await page.keyboard.press('t');
+  try {
+    await page.waitForFunction((p) => window.__sim.trackId() !== p, prevTrack, { timeout: 5000 });
+  } catch {
+    // se deja que el check falle con el estado real
+  }
   await page.waitForTimeout(300);
   seenTracks.push(await page.evaluate(() => ({
     mode: window.__sim.trackId(),
@@ -438,7 +447,16 @@ const menuPick = await page.evaluate(() => ({
 check('el menú cambia coche y circuito', menuPick.car === 'offroad' && menuPick.track === 'baja',
   JSON.stringify(menuPick));
 await page.keyboard.press('m');
-await page.waitForTimeout(300);
+// Como en la apertura: a 3-5 fps por software 300 ms fijos no bastan para
+// que la pulsación se procese en el siguiente fotograma.
+try {
+  await page.waitForFunction(
+    () => document.getElementById('menu')?.classList.contains('hidden'),
+    { timeout: 4000 },
+  );
+} catch {
+  // se deja que el check falle con el estado real
+}
 const menuClosed = await page.evaluate(() =>
   document.getElementById('menu')?.classList.contains('hidden') ?? false);
 check('M cierra el menú', menuClosed);

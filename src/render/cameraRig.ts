@@ -42,10 +42,14 @@ export class CameraRig {
     return MODE_LABEL[this.mode];
   }
 
-  drag(dx: number, dy: number): void {
+  /**
+   * Arrastre para orbitar. En táctil (`switchMode = false`) no cambia de modo:
+   * con la persecución se conduce, y la órbita se elige desde el menú/cámara.
+   */
+  drag(dx: number, dy: number, switchMode = true): void {
     this.azimuth -= dx * 0.005;
     this.polar = Math.max(0.35, Math.min(1.52, this.polar - dy * 0.005));
-    if (this.mode === 'chase' || this.mode === 'hood') this.mode = 'orbit';
+    if (switchMode && (this.mode === 'chase' || this.mode === 'hood')) this.mode = 'orbit';
   }
 
   zoom(delta: number): void {

@@ -3,6 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="theme-color" content="#0d1117" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Suspension Lab — coche con suspensión realista</title>
     <style>
       :root {
@@ -767,55 +772,164 @@
         display: none;
       }
 
-      @media (max-width: 700px) {
-        #panel {
-          width: min(306px, calc(100vw - 24px));
-        }
+      /* ---------- Solo teléfono (body.touch): el PC no se toca ---------- */
+      body.touch {
+        height: 100dvh;
+      }
 
-        #telemetry-panel {
-          display: none;
-        }
+      body.touch #menu-fab {
+        display: none;
+      }
 
-        #hud .speed {
-          font-size: 72px;
-        }
+      /* Velocidad arriba a la izquierda, compacta (debajo de las insignias). */
+      body.touch #hud {
+        left: 12px;
+        transform: none;
+        top: 70px;
+        bottom: auto;
+        text-align: left;
+      }
 
-        #hud .speed small {
-          font-size: 20px;
-        }
+      body.touch #hud .speed {
+        font-size: 40px;
+      }
 
-        #hud .gear {
-          font-size: 19px;
-        }
+      body.touch #hud .speed small {
+        font-size: 13px;
+      }
 
-        #hud .gear b {
-          font-size: 22px;
-        }
+      body.touch #hud .gear {
+        font-size: 14px;
+      }
 
-        #hud .surface {
-          font-size: 18px;
-        }
+      body.touch #hud .gear b {
+        font-size: 16px;
+      }
 
-        #hud .lap {
-          font-size: 24px;
-        }
+      body.touch #hud .surface {
+        font-size: 13px;
+      }
 
-        #hud .lap-sub {
-          font-size: 17px;
-        }
+      body.touch #hud .rpm-bar {
+        height: 8px;
+        margin-top: 6px;
+      }
 
-        #track-badge {
-          font-size: 11px;
-          padding: 6px 12px;
-        }
+      body.touch #hud .lap {
+        font-size: 17px;
+        margin-top: 6px;
+      }
 
-        #car-badge {
-          font-size: 10px;
-        }
+      body.touch #hud .lap-sub {
+        font-size: 12px;
+      }
 
-        #countdown {
-          font-size: 72px;
-        }
+      /* Minimapa arriba a la derecha, libre de los pedales. */
+      body.touch #minimap {
+        top: 76px;
+        right: 12px;
+        bottom: auto;
+        width: 128px;
+      }
+
+      /* Panel: solo botones pequeños, sin sliders ni telemetría. */
+      body.touch #panel {
+        width: min(250px, calc(100vw - 24px));
+        padding: 10px 10px 12px;
+      }
+
+      body.touch #panel h1 {
+        font-size: 13px;
+      }
+
+      body.touch #panel .subtitle {
+        display: none;
+      }
+
+      body.touch #panel #params {
+        display: none;
+      }
+
+      body.touch #telemetry-panel {
+        display: none;
+      }
+
+      body.touch #panel .buttons button {
+        padding: 6px 6px;
+        font-size: 10px;
+        min-width: 0;
+        flex: 1 1 30%;
+      }
+
+      /* Insignias compactas para no chocar con el HUD. */
+      body.touch #track-badge {
+        font-size: 10px;
+        padding: 5px 10px;
+      }
+
+      body.touch #car-badge {
+        font-size: 9px;
+        padding: 4px 10px;
+        top: 42px;
+      }
+
+      body.touch #race-warn {
+        top: 108px;
+        font-size: 11px;
+      }
+
+      body.touch #countdown {
+        font-size: 64px;
+      }
+
+      /* Menú compacto: tarjetas pequeñas sin descripción. */
+      body.touch .menu-sheet {
+        padding: 14px 14px 12px;
+        border-radius: 14px;
+      }
+
+      body.touch .menu-sheet h1 {
+        font-size: 15px;
+      }
+
+      body.touch .menu-sheet .menu-sub {
+        font-size: 10.5px;
+        margin-bottom: 8px;
+      }
+
+      body.touch .menu-sheet h2 {
+        margin: 10px 0 6px;
+      }
+
+      body.touch .menu-grid,
+      body.touch .menu-grid-3 {
+        gap: 6px;
+      }
+
+      body.touch .menu-card {
+        padding: 7px 9px;
+        font-size: 11px;
+        border-radius: 10px;
+      }
+
+      body.touch .menu-card-title {
+        font-size: 11.5px;
+      }
+
+      body.touch .menu-card-sub {
+        font-size: 10px;
+      }
+
+      body.touch .menu-card-desc {
+        display: none;
+      }
+
+      body.touch .menu-foot {
+        margin-top: 12px;
+      }
+
+      body.touch .menu-vol input[type='range'] {
+        width: 90px;
       }
 
       /* ---------- Pantalla de carga ---------- */

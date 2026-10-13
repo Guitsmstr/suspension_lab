@@ -11,6 +11,8 @@ import type { Input } from '../input';
 export interface TouchActions {
   onReset: () => void;
   onPause: () => void;
+  onMenu: () => void;
+  onCamera: () => void;
 }
 
 /** Inclinación lateral (m/s²) para el tope de dirección: ~23°. */
@@ -87,9 +89,9 @@ export class TouchControls {
     root.innerHTML = `
       <div class="tc-row tc-sys">
         <div class="tc-group">
-          <button class="tc-chip tc-tilt-toggle" data-tc="tilt" aria-label="Conducir con el giroscopio">📱 Girar: OFF</button>
-          <button class="tc-chip tc-tilt-cal hidden" data-tc="cal" aria-label="Centrar la dirección">🎯</button>
-          <button class="tc-chip tc-tilt-inv hidden" data-tc="inv" aria-label="Invertir la dirección">↔️</button>
+          <button class="tc-chip" data-tc="menu" aria-label="Abrir menú">☰</button>
+          <button class="tc-chip" data-tc="cam" aria-label="Cambiar cámara">📷</button>
+          <button class="tc-chip" data-tc="full" aria-label="Pantalla completa">⛶</button>
         </div>
         <div class="tc-group">
           <button class="tc-chip" data-tc="handbrake" aria-label="Freno de mano">🔥 MANO</button>
@@ -107,7 +109,12 @@ export class TouchControls {
           <button class="tc-btn tc-gas" data-tc="gas" aria-label="Acelerar">GAS</button>
         </div>
       </div>
-      <div class="tc-row tc-status"><span class="tc-hint">Botones o inclina el móvil</span></div>`;
+      <div class="tc-row tc-tilt">
+        <button class="tc-chip tc-tilt-toggle" data-tc="tilt" aria-label="Conducir con el giroscopio">📱 Girar: OFF</button>
+        <button class="tc-chip tc-tilt-cal hidden" data-tc="cal" aria-label="Centrar la dirección">🎯</button>
+        <button class="tc-chip tc-tilt-inv hidden" data-tc="inv" aria-label="Invertir la dirección">↔️</button>
+        <span class="tc-hint">Botones o inclina el móvil</span>
+      </div>`;
     document.body.appendChild(root);
     for (const b of root.querySelectorAll<HTMLElement>('[data-tc]')) {
       const key = b.dataset.tc ?? '';
@@ -124,9 +131,15 @@ export class TouchControls {
 
     this.tap('reset', () => this.actions.onReset());
     this.tap('pause', () => this.actions.onPause());
+    this.tap('menu', () => this.actions.onMenu());
+    this.tap('cam', () => this.actions.onCamera());
+    this.tap('full', () => void this.toggleFullscreen());
     this.tap('tilt', () => void this.toggleTilt());
     this.tap('cal', () => this.recalibrate());
     this.tap('inv', () => this.toggleInvert());
+    document.addEventListener('fullscreenchange', () => {
+      this.els['full']?.classList.toggle('on', document.fullscreenElement !== null);
+    });
   }
 
   /** Mantener pulsado: activa el flag al bajar y lo suelta al subir/cancelar. */
@@ -163,6 +176,38 @@ export class TouchControls {
       e.preventDefault();
       fn();
     });
+  }
+
+  /**
+   * Pantalla completa real (oculta la barra del navegador). Solo funciona tras
+   * un gesto del usuario, por eso va en un botón. Si el navegador lo permite,
+   * fija además el apaisado mientras se juega.
+   */
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      const el = document.documentElement as HTMLElement & {
+        requestFullscreen?: (opts?: FullscreenOptions) => Promise<void> | void;
+      };
+      if (typeof el.requestFullscreen !== 'function') {
+        this.hint('Sin pantalla completa');
+        return;
+      }
+      await el.requestFullscreen({ navigationUI: 'hide' });
+      try {
+        const orient = window.screen?.orientation as
+          | { lock?: (o: string) => Promise<void> | void }
+          | undefined;
+        await orient?.lock?.('landscape');
+      } catch {
+        /* bloqueo no soportado: se juega en la orientación actual */
+      }
+    } catch {
+      this.hint('No se pudo ampliar');
+    }
   }
 
   // ---------------- Acelerómetro ----------------

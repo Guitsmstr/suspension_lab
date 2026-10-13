@@ -63,8 +63,68 @@ const browser = await chromium.launch({
     tiltHidden: document.querySelector('[data-tc="tilt"]')?.classList.contains('hidden'),
   }));
   check('móvil: carga completa', st.done === true);
-  check('móvil: controles visibles', st.tc === true && st.btns >= 8, `${st.btns} botones`);
+  check('móvil: controles visibles', st.tc === true && st.btns >= 10, `${st.btns} botones`);
   check('móvil: sin errores de consola', errors.length === 0, errors.join(' | '));
+
+  // Cámara por defecto: persecución (3ª persona trasera)
+  const camMode = await page.evaluate(() => window.__sim?.cameraRig.mode);
+  check('móvil: cámara en persecución', camMode === 'chase', String(camMode));
+
+  // Arrastrar en táctil NO saca de la persecución
+  await page.evaluate(() => {
+    const c = document.querySelector('#view canvas');
+    c?.dispatchEvent(new PointerEvent('pointerdown', { clientX: 195, clientY: 400, bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 100, clientY: 400, bubbles: true }));
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  });
+  await page.waitForTimeout(400);
+  const camAfterDrag = await page.evaluate(() => window.__sim?.cameraRig.mode);
+  check('móvil: el arrastre no rompe la persecución', camAfterDrag === 'chase', String(camAfterDrag));
+
+  // ☰ abre el menú compacto
+  await page.locator('[data-tc="menu"]').click();
+  await page.waitForTimeout(400);
+  const menuOpen = await page.evaluate(() =>
+    !document.getElementById('menu')?.classList.contains('hidden'));
+  check('móvil: ☰ abre el menú', menuOpen === true);
+  await page.screenshot({ path: '.launch/11-touch-menu.png' });
+  await page.locator('#btn-drive').click();
+  await page.waitForTimeout(400);
+
+  // 📷 rota la cámara (chase → hood)
+  await page.locator('[data-tc="cam"]').click();
+  await page.waitForTimeout(400);
+  const camAfterBtn = await page.evaluate(() => window.__sim?.cameraRig.mode);
+  check('móvil: 📷 cambia la cámara', camAfterBtn === 'hood', String(camAfterBtn));
+  await page.locator('[data-tc="cam"]').click();
+  await page.waitForTimeout(300);
+  await page.locator('[data-tc="cam"]').click();
+  await page.waitForTimeout(400);
+  const camBack = await page.evaluate(() => window.__sim?.cameraRig.mode);
+  check('móvil: 📷 vuelve a persecución', camBack === 'chase', String(camBack));
+
+  // ⛶ existe (en headless no puede entrar en pantalla completa real)
+  const full = await page.evaluate(() => !!document.querySelector('[data-tc="full"]'));
+  check('móvil: botón ⛶ presente', full === true);
+
+  // Disposición móvil: HUD arriba-izquierda, minimapa arriba-derecha
+  const layout = await page.evaluate(() => {
+    const hud = document.getElementById('hud')?.getBoundingClientRect();
+    const mini = document.getElementById('minimap')?.getBoundingClientRect();
+    const vw = window.innerWidth;
+    return {
+      hudLeft: Math.round(hud?.left ?? -1),
+      hudTop: Math.round(hud?.top ?? -1),
+      miniRight: Math.round(vw - (mini?.right ?? vw)),
+      miniTop: Math.round(mini?.top ?? -1),
+      miniBottom: Math.round(mini?.bottom ?? -1),
+    };
+  });
+  check('móvil: velocidad arriba a la izquierda', layout.hudLeft <= 16 && layout.hudTop < 140,
+    `izq=${layout.hudLeft} sup=${layout.hudTop}`);
+  check('móvil: minimapa arriba a la derecha (lejos de pedales)',
+    layout.miniRight <= 16 && layout.miniTop < 140 && layout.miniBottom < 400,
+    `der=${layout.miniRight} sup=${layout.miniTop} inf=${layout.miniBottom}`);
 
   // GAS táctil → throttle 1 en la sim
   await page.evaluate(() => window.__sim?.input.update?.(0.016));
