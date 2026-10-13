@@ -33,6 +33,7 @@ import { Minimap } from './render/minimap';
 import { RaceDirector } from './world/race';
 import { Panel } from './ui/panel';
 import { Menu } from './ui/menu';
+import { TouchControls } from './ui/touchControls';
 import { Loader, installErrorReporter } from './ui/loader';
 import { GameAudio } from './audio/gameAudio';
 
@@ -445,6 +446,22 @@ async function boot(): Promise<void> {
     let accumulator = 0;
     let firstFrame = true;
     let running = true;
+
+    // Controles táctiles (solo se muestran en teléfono): botones + giro por
+    // inclinación. En pantallas pequeñas el panel arranca contraído para dejar
+    // ver la pista.
+    const touch = new TouchControls(input, {
+      onReset: () => {
+        vehicle.reset();
+        race.reset();
+        startCountdown();
+      },
+      onPause: () => {
+        paused = !paused;
+        panel.setPaused(paused);
+      },
+    });
+    if (touch.isTouch && window.innerWidth < 860) panel.toggleCollapsed();
 
     const frame = (): void => {
       if (!running) return;

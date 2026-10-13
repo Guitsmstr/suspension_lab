@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vite build --ssr scripts/physics-smoke.ts --outDir .smoke && node .smoke/physics-smoke.js",
     "check:launch": "node scripts/launch-check.mjs",
+    "check:touch": "node scripts/touch-check.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

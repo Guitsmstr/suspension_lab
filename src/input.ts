@@ -1,6 +1,10 @@
 /**
- * Keyboard + mouse input, normalized to driving controls.
+ * Keyboard + mouse + touch input, normalized to driving controls.
  * Steering is smoothed toward the target so the car is not twitchy.
+ *
+ * Touch buttons and the tilt (accelerometer) steering write into the public
+ * `touch` / `tilt` fields (see `TouchControls`); `update` merges them with
+ * the keyboard so both work at the same time.
  */
 export interface InputState {
   throttle: number; // 0..1
@@ -27,6 +31,25 @@ export class Input {
   private pressed = new Set<string>(); // flanco de pulsación (una vez por tecla)
   private steerTarget = 0;
 
+  /** Botones táctiles (los escribe `TouchControls`, los lee `update`). */
+  readonly touch = {
+    left: false,
+    right: false,
+    throttle: 0, // 0..1
+    brake: 0, // 0..1
+    handbrake: false,
+  };
+
+  /**
+   * Dirección por inclinación (acelerómetro). Cuando `enabled` y hay datos
+   * recientes (`active`), sustituye a los botones como objetivo de dirección.
+   */
+  readonly tilt = {
+    enabled: false,
+    active: false,
+    steer: 0, // -1..1, ya calibrado y con signo aplicado
+  };
+
   constructor() {
     window.addEventListener('keydown', (e) => {
       // Evita el scroll con las flechas / espacio
@@ -49,14 +72,21 @@ export class Input {
   update(dt: number): void {
     const s = this.state;
 
-    s.throttle = this.down('KeyW', 'ArrowUp') ? 1 : 0;
-    s.brake = this.down('KeyS', 'ArrowDown') ? 1 : 0;
-    s.handbrake = this.down('Space');
+    const keyThrottle = this.down('KeyW', 'ArrowUp') ? 1 : 0;
+    const keyBrake = this.down('KeyS', 'ArrowDown') ? 1 : 0;
+    s.throttle = Math.max(keyThrottle, Math.max(0, Math.min(1, this.touch.throttle)));
+    s.brake = Math.max(keyBrake, Math.max(0, Math.min(1, this.touch.brake)));
+    s.handbrake = this.down('Space') || this.touch.handbrake;
     s.testMode = this.down('ShiftLeft', 'ShiftRight');
 
-    const left = this.down('KeyA', 'ArrowLeft');
-    const right = this.down('KeyD', 'ArrowRight');
-    this.steerTarget = (right ? 1 : 0) - (left ? 1 : 0);
+    const left = this.down('KeyA', 'ArrowLeft') || this.touch.left;
+    const right = this.down('KeyD', 'ArrowRight') || this.touch.right;
+    // El acelerómetro manda sobre los botones cuando está activo: da un
+    // objetivo analógico (-1..1) en vez de todo/nada.
+    this.steerTarget =
+      this.tilt.enabled && this.tilt.active
+        ? Math.max(-1, Math.min(1, this.tilt.steer))
+        : (right ? 1 : 0) - (left ? 1 : 0);
 
     const rate = this.steerTarget === 0 ? STEER_RETURN : STEER_RATE;
     const diff = this.steerTarget - s.steer;
