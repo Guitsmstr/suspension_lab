@@ -7,9 +7,9 @@
  *   vías ~1,58 m, ~258 kW; el preset de potencia lo deja en ~250 kW).
  * - `offroad`: un 4x4 de estilo baja (alto, pesado, ruedas grandes, 4WD).
  * - `kwid`: Renault Kwid 1.0 (datos: ~775 kg + conductor ≈ 820 kg, 50 kW/68 CV,
- *   batalla 2,422 m, vía 1,41 m — estrechada a 1,23 m por los pasos del
- *   modelo Tripo (ruedas a ±0,615) —, ruedas 165/70 R13, CdM alto de
- *   crossover económico (0,62 m frente a los 0,50 m del sedán con batería
+ *   batalla 2,422 m, vía 1,39 m (cara externa a ras, como los 1,41 m
+ *   reales sobre 1,58 m de ancho) —, ruedas 165/70 R13, CdM alto de
+ *   crossover económico (0,58 m frente a los 0,50 m del sedán con batería
  *   en el piso), suspensiones blandas y estabilizadora trasera casi
  *   testimonial: en curva tumba visiblemente más que el Tesla).
  */
@@ -186,9 +186,12 @@ export const CARS: Record<CarId, CarSpec> = {
     badge: '🚗 Kwid · delantera',
     blurb: 'Crossover urbano de tracción delantera. Ligero y ágil.',
     mass: 820,
-    comHeight: 0.62, // crossover alto y estrecho (1,48 m, 180 mm de despeje): CdM claramente por encima del sedán
+    comHeight: 0.57, // asentado 5 cm respecto al Tripo (0,62): el paso quedaba
+    // con ~10 cm de hueco frente a ~3 cm reales; sigue claramente por encima
+    // del sedán (0,50) y mantiene el balanceo visible en curva
     wheelbase: 2.42,
-    track: 1.23, // vía estrechada a los pasos del Tripo (±0.615)
+    track: 1.39, // cara externa del neumático a ras de carrocería (±0,79),
+    // como el Kwid real (vía 1,41 m, ancho 1,58 m)
     wheelRadius: 0.31,
     unsprungFront: 30,
     unsprungRear: 28,
@@ -199,7 +202,7 @@ export const CARS: Record<CarId, CarSpec> = {
     dragArea: 0.72, // carrocería alta y estrecha
     liftArea: 0.35, // sin fondo plano: a velocidad sustenta menos que el sedán
     chassisContacts: KWID_CONTACTS,
-    hoodY: 1.22,
+    hoodY: 1.17, // ojo 5 cm más bajo con el asentado
     preset: {
       fSpring: 20, // McPherson blando de utilitario: permite balanceo visible
       fBump: 2600,
